@@ -97,6 +97,11 @@ class TestCellToDisplayText:
         result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
         assert result == "12:34:56"
 
+    def test_single_hour_token_preserved(self):
+        dt = datetime(2021, 8, 8, 0, 34, 56)
+        result = _cell_to_display_text(_FakeCell(dt, number_format="yyyy-mm-dd h:mm:ss"))
+        assert result == "2021-08-08 0:34:56"
+
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
         for raw in [" a", "a ", " a ", "\ta", "a\t"]:

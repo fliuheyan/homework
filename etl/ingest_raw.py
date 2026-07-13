@@ -119,6 +119,11 @@ def _clean_number_format_section(section: str) -> str:
     return "".join(value for _, value in _iter_format_parts(section))
 
 
+def _last_placeholder_index(section: str) -> int:
+    indexes = [i for ch in ("#", "0", "?") if (i := section.rfind(ch)) != -1]
+    return max(indexes) if indexes else -1
+
+
 def _is_minute_token(parts: list[tuple[str, str]], idx: int) -> bool:
     prev_token = next((v.lower() for k, v in reversed(parts[:idx]) if k == "token"), "")
     next_token = next((v.lower() for k, v in parts[idx + 1:] if k == "token"), "")
@@ -135,7 +140,10 @@ def _render_datetime_with_excel_format(v: datetime, section: str) -> str:
 
         token = value.lower()
         if token.startswith("y"):
-            rendered.append(f"{v.year % 100:02d}" if len(token) == 2 else f"{v.year:04d}")
+            if len(token) == 2:
+                rendered.append(f"{v.year % 100:02d}")
+            else:
+                rendered.append(f"{v.year:04d}")
         elif token.startswith("d"):
             if len(token) == 1:
                 rendered.append(str(v.day))
@@ -211,7 +219,7 @@ def _cell_to_display_text(cell):
         integer_part = section.split(".", 1)[0]
         use_grouping = "," in integer_part
         number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")
-        last_placeholder = max(section.rfind("#"), section.rfind("0"), section.rfind("?"))
+        last_placeholder = _last_placeholder_index(section)
         if last_placeholder == -1:
             return number
         prefix = section[:first_placeholder]

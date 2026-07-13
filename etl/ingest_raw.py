@@ -229,9 +229,9 @@ def _cell_to_display_text(cell):
     if v is None:
         return None
 
-    # 日期/时间：按 number_format 输出
+    # 日期/时间：直接输出原始值，不应用 Excel number_format
     if isinstance(v, (datetime, date)):
-        return _excel_date_to_text(v, cell.number_format)
+        return _excel_date_to_text(v, "")
 
     # 数值：按 number_format 输出（保留货币符号等格式信息）
     if isinstance(v, (int, float)):

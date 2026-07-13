@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 from sqlalchemy import text
 
@@ -15,9 +17,14 @@ def pick_random_customer_ids_by_email(customer_df: pd.DataFrame, random_state=No
     return customer_map[["customer_id", "email_norm"]]
 
 
-def attach_customer_ids_to_orders(df_orders: pd.DataFrame, customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
+def get_order_customer_selection_seed():
+    seed = os.getenv("ORDER_CUSTOMER_SELECTION_SEED")
+    return int(seed) if seed is not None else None
+
+
+def attach_customer_ids_to_orders(orders_df: pd.DataFrame, customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
     customer_map = pick_random_customer_ids_by_email(customer_df, random_state=random_state)
-    return df_orders.merge(customer_map, on="email_norm", how="left")
+    return orders_df.merge(customer_map, on="email_norm", how="left")
 
 
 def main():
@@ -100,7 +107,11 @@ def main():
         if missing_orders_cols:
             raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
 
-        df_orders = attach_customer_ids_to_orders(df_orders, customer_df)
+        df_orders = attach_customer_ids_to_orders(
+            df_orders,
+            customer_df,
+            random_state=get_order_customer_selection_seed(),
+        )
         df_orders = df_orders.dropna(subset=["customer_id", "order_date", "net_amount", "order_number"])
         df_orders = df_orders.drop_duplicates(subset=["order_number"], keep="first")
 

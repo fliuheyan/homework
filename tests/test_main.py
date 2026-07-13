@@ -1,6 +1,10 @@
 import pandas as pd
 
-from etl.main import attach_customer_ids_to_orders, pick_random_customer_ids_by_email
+from etl.main import (
+    attach_customer_ids_to_orders,
+    get_order_customer_selection_seed,
+    pick_random_customer_ids_by_email,
+)
 
 
 def test_pick_random_customer_ids_by_email_keeps_one_customer_per_email():
@@ -47,3 +51,9 @@ def test_attach_customer_ids_to_orders_uses_selected_customer_id():
     assert dup_customer_id in {10, 11}
     assert pd.isna(missing_customer_id)
     assert unique_customer_id == 12
+
+
+def test_get_order_customer_selection_seed(monkeypatch):
+    monkeypatch.setenv("ORDER_CUSTOMER_SELECTION_SEED", "7")
+
+    assert get_order_customer_selection_seed() == 7

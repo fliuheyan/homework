@@ -67,8 +67,14 @@ def _cell_to_display_text(cell):
     if isinstance(v, datetime):
         if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
             return f"{v.year}年{v.month}月{v.day}日"
-        has_date_tokens = any(t in clean_fmt for t in ["y", "d"])
-        has_time_tokens = any(t in clean_fmt for t in ["h", "s"])
+        has_date_tokens = (
+            any(t in clean_fmt for t in ["y", "d", "年", "月", "日"])
+            or bool(re.search(r"[ymd]+[/-][ymd]+", clean_fmt))
+        )
+        has_time_tokens = (
+            any(t in clean_fmt for t in ["h", "s", "时", "分", "秒"])
+            or bool(re.search(r"h+:[m]+", clean_fmt))
+        )
         if has_time_tokens and not has_date_tokens:
             return v.strftime("%H:%M:%S")
         if has_date_tokens and has_time_tokens:
@@ -84,7 +90,11 @@ def _cell_to_display_text(cell):
             decimals = 0
             if "." in section:
                 tail = section.split(".", 1)[1]
-                decimals = len(re.findall(r"[0#]", tail))
+                for ch in tail:
+                    if ch in ("0", "#"):
+                        decimals += 1
+                    else:
+                        break
             number = f"{float(v):.{decimals}f}"
             placeholder_positions = []
             for ch in ("#", "0"):
@@ -95,10 +105,13 @@ def _cell_to_display_text(cell):
                 return str(v)
             first_placeholder = min(placeholder_positions)
             symbol_pos = section.find(symbol)
+            has_space_near_symbol = (
+                (symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " ")
+                or (symbol_pos > 0 and section[symbol_pos - 1] == " ")
+            )
+            space = " " if has_space_near_symbol else ""
             if symbol_pos < first_placeholder:
-                space = " " if symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " " else ""
                 return f"{symbol}{space}{number}"
-            space = " " if symbol_pos > 0 and section[symbol_pos - 1] == " " else ""
             return f"{number}{space}{symbol}"
         return str(v)
 

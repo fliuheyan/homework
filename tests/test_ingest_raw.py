@@ -84,11 +84,13 @@ class TestCellToDisplayText:
 
     def test_locale_short_month_date_display_preserved(self):
         dt = datetime(2021, 8, 2, 0, 0, 0)
+        # [$-407] is a locale tag; raw ingest should preserve the visible d/mmm text.
         result = _cell_to_display_text(_FakeCell(dt, number_format='[$-407]d/\\ mmm/;@'))
         assert result == "2/ Aug/"
 
     def test_long_date_display_preserved(self):
         dt = datetime(2021, 8, 8, 0, 0, 0)
+        assert dt.weekday() == 6
         result = _cell_to_display_text(_FakeCell(dt, number_format='[$-F800]dddd\\,\\ mmmm\\ dd\\,\\ yyyy'))
         assert result == "Sunday, August 08, 2021"
 

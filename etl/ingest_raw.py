@@ -120,13 +120,29 @@ def _clean_number_format_section(section: str) -> str:
 
 
 def _last_placeholder_index(section: str) -> int:
-    indexes = [i for ch in ("#", "0", "?") if (i := section.rfind(ch)) != -1]
-    return max(indexes) if indexes else -1
+    last_index = -1
+    for ch in ("#", "0", "?"):
+        idx = section.rfind(ch)
+        if idx > last_index:
+            last_index = idx
+    return last_index
 
 
 def _is_minute_token(parts: list[tuple[str, str]], idx: int) -> bool:
-    prev_token = next((v.lower() for k, v in reversed(parts[:idx]) if k == "token"), "")
-    next_token = next((v.lower() for k, v in parts[idx + 1:] if k == "token"), "")
+    prev_token = ""
+    for i in range(idx - 1, -1, -1):
+        kind, value = parts[i]
+        if kind == "token":
+            prev_token = value.lower()
+            break
+
+    next_token = ""
+    for i in range(idx + 1, len(parts)):
+        kind, value = parts[i]
+        if kind == "token":
+            next_token = value.lower()
+            break
+
     return prev_token.startswith("h") or next_token.startswith("s")
 
 

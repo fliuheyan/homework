@@ -11,9 +11,9 @@ from openpyxl import load_workbook
 from etl.db import get_engine
 
 SHEET_TO_RAW_TABLE = {
-    "orders": ("raw", "orders_raw"),
-    "customer": ("raw", "customer_raw"),
-    "survey": ("raw", "survey_raw"),
+    "orders": ("raw", "orders"),
+    "customer": ("raw", "customer"),
+    "survey": ("raw", "survey"),
 }
 
 RAW_COLUMNS = {

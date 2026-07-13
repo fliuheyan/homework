@@ -8,11 +8,11 @@ from etl.plugin_engine import discover_plugins_for_table, run_plugins
 def main():
     engine = get_engine()
 
-    # 1) 找到最新 batch_id（以 orders_raw 为基准；如需更严谨可做三表交集校验）
+    # 1) 找到最新 batch_id（以 orders 为基准；如需更严谨可做三表交集校验）
     with engine.begin() as conn:
         batch_id = conn.execute(text("""
             SELECT batch_id
-            FROM raw.orders_raw
+            FROM raw.orders
             ORDER BY ingested_at DESC
             LIMIT 1
         """)).scalar()
@@ -31,15 +31,15 @@ def main():
         # 2) 读取 raw（仅本次 batch）
         with engine.begin() as conn:
             df_orders = pd.read_sql(
-                text("SELECT * FROM raw.orders_raw WHERE batch_id = :b"),
+                text("SELECT * FROM raw.orders WHERE batch_id = :b"),
                 conn, params={"b": batch_id}
             )
             df_customer = pd.read_sql(
-                text("SELECT * FROM raw.customer_raw WHERE batch_id = :b"),
+                text("SELECT * FROM raw.customer WHERE batch_id = :b"),
                 conn, params={"b": batch_id}
             )
             df_survey = pd.read_sql(
-                text("SELECT * FROM raw.survey_raw WHERE batch_id = :b"),
+                text("SELECT * FROM raw.survey WHERE batch_id = :b"),
                 conn, params={"b": batch_id}
             )
 
@@ -132,9 +132,9 @@ def main():
         # 8) 回写 run log
         with engine.begin() as conn:
             stats = {
-                "ror": conn.execute(text("SELECT COUNT(*) FROM raw.orders_raw WHERE batch_id = :b"), {"b": batch_id}).scalar(),
-                "rcr": conn.execute(text("SELECT COUNT(*) FROM raw.customer_raw WHERE batch_id = :b"), {"b": batch_id}).scalar(),
-                "rsr": conn.execute(text("SELECT COUNT(*) FROM raw.survey_raw WHERE batch_id = :b"), {"b": batch_id}).scalar(),
+                "ror": conn.execute(text("SELECT COUNT(*) FROM raw.orders WHERE batch_id = :b"), {"b": batch_id}).scalar(),
+                "rcr": conn.execute(text("SELECT COUNT(*) FROM raw.customer WHERE batch_id = :b"), {"b": batch_id}).scalar(),
+                "rsr": conn.execute(text("SELECT COUNT(*) FROM raw.survey WHERE batch_id = :b"), {"b": batch_id}).scalar(),
                 "roc": conn.execute(text("SELECT COUNT(*) FROM core.orders")).scalar(),
                 "rcc": conn.execute(text("SELECT COUNT(*) FROM core.customer")).scalar(),
                 "rsc": conn.execute(text("SELECT COUNT(*) FROM core.survey")).scalar(),
@@ -144,9 +144,9 @@ def main():
                 UPDATE audit.etl_run_log
                 SET ended_at = now(),
                     status = 'success',
-                    rows_orders_raw = :ror,
-                    rows_customer_raw = :rcr,
-                    rows_survey_raw = :rsr,
+                    rows_orders = :ror,
+                    rows_customer = :rcr,
+                    rows_survey = :rsr,
                     rows_orders_core = :roc,
                     rows_customer_core = :rcc,
                     rows_survey_core = :rsc

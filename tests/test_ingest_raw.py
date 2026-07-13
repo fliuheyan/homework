@@ -67,7 +67,7 @@ class TestCellToDisplayText:
     def test_datetime_value_no_formatting(self):
         dt = datetime(2023, 1, 15, 10, 30, 0)
         result = _cell_to_display_text(_FakeCell(dt, number_format="dd/mm/yyyy"))
-        assert result == "2023-01-15"
+        assert result == "15/01/2023"
 
     def test_currency_prefix_symbol_preserved(self):
         result = _cell_to_display_text(_FakeCell(20.46, number_format="$#,##0.00"))
@@ -113,7 +113,7 @@ def _make_xlsx(rows: list[list]) -> str:
 
 
 def _make_xlsx_with_formats(rows: list[list], number_formats: dict[tuple[int, int], str]) -> str:
-    """Write rows to a temporary xlsx and apply custom number formats to specific cells."""
+    """Write rows to a temporary xlsx and apply custom formats (1-based row/col keys)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "orders"

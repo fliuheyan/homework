@@ -68,7 +68,9 @@ def _cell_to_display_text(cell):
 
     if isinstance(v, datetime):
         if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
-            return f"{v.year}年{v.month}月{v.day}日"
+            m = f"{v.month:02d}" if "mm" in clean_fmt else str(v.month)
+            d = f"{v.day:02d}" if "dd" in clean_fmt else str(v.day)
+            return f"{v.year}年{m}月{d}日"
         has_date_tokens = (
             any(t in clean_fmt for t in ["y", "d", "年", "月", "日"])
             or bool(re.search(r"[ymd]+[/-][ymd]+", clean_fmt))
@@ -82,7 +84,20 @@ def _cell_to_display_text(cell):
         if has_date_tokens and has_time_tokens:
             return v.strftime("%Y-%m-%d %H:%M:%S")
         if has_date_tokens:
-            return f"{v.year:04d}-{v.month:02d}-{v.day:02d}"
+            date_fmt = clean_first_section.lower()
+
+            def _repl(match):
+                token = match.group(0)
+                ch = token[0]
+                if ch == "y":
+                    return f"{v.year % 100:02d}" if len(token) == 2 else f"{v.year:04d}"
+                if ch == "m":
+                    return f"{v.month:02d}" if len(token) >= 2 else str(v.month)
+                if ch == "d":
+                    return f"{v.day:02d}" if len(token) >= 2 else str(v.day)
+                return token
+
+            return re.sub(r"y{2,4}|m{1,2}|d{1,2}", _repl, date_fmt)
         return str(v)
 
     if isinstance(v, (int, float, Decimal)):
@@ -98,14 +113,12 @@ def _cell_to_display_text(cell):
                     continue
                 else:
                     break
-        placeholder_positions = []
-        for ch in ("#", "0"):
-            pos = section.find(ch)
-            if pos != -1:
-                placeholder_positions.append(pos)
-        if not placeholder_positions:
+        hash_pos = section.find("#")
+        zero_pos = section.find("0")
+        positions = [p for p in (hash_pos, zero_pos) if p != -1]
+        if not positions:
             return str(v)
-        first_placeholder = min(placeholder_positions)
+        first_placeholder = min(positions)
         integer_part = section.split(".", 1)[0]
         use_grouping = "," in integer_part
         number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")

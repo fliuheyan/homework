@@ -67,6 +67,7 @@ We use a plugin-based mechanism here; the program scans all folders within trans
 | `audit.etl_run_log` | Start time, end time, status, row counts, and error message for each ETL batch |
 | `audit.data_quality_issue_summary` | Field-level quality issue statistics |
 | `audit.data_quality_table_summary` | Table-level totals and invalid-record counts |
+| `audit.customer_monthly_order_summary` | Latest batch monthly order totals per customer, refreshed after each `core.*` rebuild |
 | `audit.v_etl_run_metrics` | Per-run duration and status metrics |
 | `audit.v_etl_health_kpis` | Latest status, success rate, average runtime, and P95 runtime |
 | `audit.v_data_quality_batch_metrics` | Per-table issue rate for each batch |
@@ -74,6 +75,30 @@ We use a plugin-based mechanism here; the program scans all folders within trans
 | `audit.v_latest_data_quality_summary` | Latest batch quality snapshot |
 | `audit.v_table_volume` | Current row counts in raw/core tables |
 | `audit.v_table_freshness` | Latest timestamps and freshness lag for raw/core tables |
+
+### 2.4 Datatypes for the Monthly Customer Order Summary
+
+| Column | Datatype | Description |
+|---|---|---|
+| `batch_id` | `TEXT` | Latest ETL batch identifier used to build the summary |
+| `customer_id` | `BIGINT` | Customer foreign key from `core.customer.customer_id` |
+| `customer_email` | `TEXT` | Customer email stored from `core.customer.email` |
+| `order_month` | `DATE` | First day of the order month derived from `core.orders.order_date` |
+| `order_count` | `INT` | Number of orders for the customer in that month |
+| `total_net_amount` | `NUMERIC(14,2)` | Sum of `core.orders.net_amount` for the customer and month |
+| `refreshed_at` | `TIMESTAMP` | Timestamp when the summary row was written |
+
+Short SQL query:
+
+```sql
+SELECT
+  customer_id,
+  customer_email,
+  order_month,
+  total_net_amount
+FROM audit.customer_monthly_order_summary
+ORDER BY customer_id, order_month;
+```
 
 ---
 
@@ -227,6 +252,7 @@ main.py
    │   Discover and execute transformers
    │   TRUNCATE core.survey/core.orders/core.customer
    │   Rewrite core tables
+   │   Refresh audit.customer_monthly_order_summary
    ▼
 audit.etl_run_log
    │   Record success/failed status, row counts, and error messages

@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS audit.data_quality_table_summary (
   PRIMARY KEY (batch_id, table_name)
 );
 
+CREATE TABLE IF NOT EXISTS audit.customer_monthly_order_summary (
+  batch_id TEXT NOT NULL,
+  customer_id BIGINT NOT NULL,
+  customer_email TEXT,
+  order_month DATE NOT NULL,
+  order_count INT NOT NULL,
+  total_net_amount NUMERIC(14,2) NOT NULL,
+  refreshed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (batch_id, customer_id, order_month)
+);
+
 CREATE OR REPLACE VIEW audit.v_etl_run_metrics AS
 SELECT
   run_id,
@@ -315,3 +326,5 @@ CREATE INDEX IF NOT EXISTS idx_etl_run_log_batch_id ON audit.etl_run_log(batch_i
 CREATE INDEX IF NOT EXISTS idx_etl_run_log_started_at ON audit.etl_run_log(started_at);
 CREATE INDEX IF NOT EXISTS idx_dq_issue_summary_created_at ON audit.data_quality_issue_summary(created_at);
 CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_at ON audit.data_quality_table_summary(created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_monthly_order_summary_month
+  ON audit.customer_monthly_order_summary(order_month, customer_id);

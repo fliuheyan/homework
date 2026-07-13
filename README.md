@@ -1,43 +1,96 @@
+# Homework ETL + Grafana Monitoring
 
+## Overview
 
-### How to run the project
+This repository builds a small ETL pipeline on top of a single PostgreSQL database:
 
+- `raw` schema stores ingested source data as text
+- `core` schema stores cleaned business tables
+- `audit` schema stores ETL run logs and Grafana-facing quality metrics
 
-### Prerequisites
+Grafana is provisioned as the frontend and reads metrics directly from the existing PostgreSQL instance.
 
-tabble 分为三层
-raw layer: 原始数据, 添加审核字段source_file，sheet_name，load_time
-: 清洗后的数据
-: 
+## Prerequisites
 
-2. Data Quality Checks
-可以扫描出每张表的问题，并且列出问题
-格式异常计数（日期、金额、email）
-非空约束
-值域检查（如 loyalty_score 是否在 1~3）
-合法值
-关联完整
+- Docker and Docker Compose
+- Python 3.x (for local test execution)
 
-如果某个字段有问题，会被标记为 dirty，dirty 的字段会被记录在 dirty_fields 中，dirty 的行会被记录在 dirty_rows 中
+## Run the stack
 
-检查结构：字段名、类型是否合理，是否混合类型
-检查完整性：空值率、缺失模式
-检查唯一性：主键/候选键是否重复
-检查合法性：值是否在业务允许范围内（如 loyalty_score 只能 1-3）
-检查一致性：同一概念是否多种写法（DE vs Deutschland）
-检查格式：日期、金额、email 是否统一格式
-检查异常/离群：负金额、未来日期、超大值等
-检查可关联性：orders 的 email 能否匹配 customer（join 命中率）
+From the repository root:
 
+```bash
+docker compose up --build
+```
 
+This starts:
 
+- `postgres` on `localhost:5432`
+- `etl`, which runs:
+  1. `python -m etl.ingest_raw`
+  2. `python -m etl.data_check`
+  3. `python -m etl.main`
+- `grafana` on `http://localhost:3000`
 
-日期格式混乱（2021/9/1, 2/ Aug/, 2021年9月18日）
-金额含 € 或不含符号
-gender 混用（male/female/m/f）
-country 混用（DE/Deutschland）
-survey 第一列混合 order number 和 email
-city 与 zip 混在一起（Düsseldorf 40239）
-email 大小写不一致、疑似重复实体
+Grafana default credentials:
 
-3. 每张表具体的清洗方案
+- username: `${GRAFANA_ADMIN_USER:-admin}`
+- password: `${GRAFANA_ADMIN_PASSWORD:-admin}`
+
+## Grafana setup
+
+Provisioning files live under:
+
+- `./grafana/provisioning/datasources/postgres.yaml`
+- `./grafana/provisioning/dashboards/dashboard.yaml`
+- `./grafana/dashboards/etl-monitoring.json`
+
+Grafana uses the existing PostgreSQL container as its datasource:
+
+- host: `${DB_HOST:-postgres}:${DB_PORT:-5432}`
+- database: `${DB_NAME:-bi_db}`
+- user: `${DB_USER:-bi_user}`
+
+## Metrics exposed for Grafana
+
+The ETL persists monitoring data into PostgreSQL and exposes Grafana-friendly views:
+
+- `audit.etl_run_log`: ETL batch execution records
+- `audit.data_quality_issue_summary`: field-level quality issue counts by batch
+- `audit.data_quality_table_summary`: table-level quality totals by batch
+- `audit.v_etl_run_metrics`: runtime/status metrics per ETL run
+- `audit.v_etl_health_kpis`: latest status, success rate, average runtime, P95 runtime
+- `audit.v_data_quality_batch_metrics`: total quality issues and issue rates by batch/table
+- `audit.v_data_quality_issue_metrics`: field-level issue metrics over time
+- `audit.v_latest_data_quality_summary`: latest batch quality snapshot
+- `audit.v_table_volume`: current row counts for raw/core tables
+- `audit.v_table_freshness`: latest timestamps and freshness lag for raw/core tables
+
+## Dashboard contents
+
+The provisioned dashboard `Homework ETL Monitoring` focuses on:
+
+- latest ETL status
+- job success rate
+- average runtime
+- latest batch quality issue count
+- ETL runtime trend
+- quality issue trend
+- per-table freshness
+- current raw/core table volumes
+
+## Data quality report
+
+`python -m etl.data_check` still writes the Markdown report to:
+
+- `/app/reports/data_quality_report.md`
+
+It now also writes the same quality results into PostgreSQL for Grafana queries.
+
+## Tests
+
+From the repository root:
+
+```bash
+python -m pytest -q
+```

@@ -33,7 +33,28 @@ services:
     command: >
       sh -c "pip install -r requirements.txt &&
             python -m etl.ingest_raw &&
+            python -m etl.data_check &&
             python -m etl.main"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: bi_grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-bi_db}
+      DB_USER: ${DB_USER:-bi_user}
+      DB_PASSWORD: ${DB_PASSWORD:-bi_pass}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
 
 volumes:
   pg_data:

@@ -113,6 +113,196 @@ CREATE TABLE IF NOT EXISTS audit.etl_run_log (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS audit.data_quality_issue_summary (
+  batch_id TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  column_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  invalid_count INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (batch_id, table_name, column_name, description)
+);
+
+CREATE TABLE IF NOT EXISTS audit.data_quality_table_summary (
+  batch_id TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  total_records INT NOT NULL,
+  total_issues INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (batch_id, table_name)
+);
+
+CREATE OR REPLACE VIEW audit.v_etl_run_metrics AS
+SELECT
+  run_id,
+  batch_id,
+  started_at,
+  ended_at,
+  status,
+  CASE
+    WHEN ended_at IS NULL THEN NULL
+    ELSE EXTRACT(EPOCH FROM (ended_at - started_at))::DOUBLE PRECISION
+  END AS runtime_seconds,
+  rows_orders,
+  rows_customer,
+  rows_survey,
+  rows_orders_core,
+  rows_customer_core,
+  rows_survey_core,
+  error_message
+FROM audit.etl_run_log
+WHERE started_at IS NOT NULL;
+
+CREATE OR REPLACE VIEW audit.v_etl_health_kpis AS
+WITH latest_run AS (
+  SELECT batch_id, status, started_at, ended_at
+  FROM audit.etl_run_log
+  ORDER BY started_at DESC NULLS LAST, run_id DESC
+  LIMIT 1
+),
+latest_success AS (
+  SELECT batch_id, ended_at
+  FROM audit.etl_run_log
+  WHERE status = 'success'
+  ORDER BY ended_at DESC NULLS LAST, run_id DESC
+  LIMIT 1
+),
+aggregates AS (
+  SELECT
+    COUNT(*)::INT AS total_runs,
+    COUNT(*) FILTER (WHERE status = 'success')::INT AS success_runs,
+    COUNT(*) FILTER (WHERE status = 'failed')::INT AS failed_runs,
+    COUNT(*) FILTER (WHERE status = 'running')::INT AS running_runs,
+    ROUND(
+      (100.0 * COUNT(*) FILTER (WHERE status = 'success') / NULLIF(COUNT(*), 0))::NUMERIC,
+      2
+    ) AS success_rate_pct,
+    ROUND(
+      (AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) FILTER (WHERE ended_at IS NOT NULL))::NUMERIC,
+      2
+    ) AS avg_runtime_seconds,
+    ROUND(
+      (
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)))
+        FILTER (WHERE ended_at IS NOT NULL)
+      )::NUMERIC,
+      2
+    ) AS p95_runtime_seconds
+  FROM audit.etl_run_log
+)
+SELECT
+  a.total_runs,
+  a.success_runs,
+  a.failed_runs,
+  a.running_runs,
+  a.success_rate_pct,
+  a.avg_runtime_seconds,
+  a.p95_runtime_seconds,
+  ls.ended_at AS last_successful_load_at,
+  ls.batch_id AS last_successful_batch_id,
+  lr.batch_id AS latest_batch_id,
+  lr.status AS latest_status,
+  lr.started_at AS latest_started_at,
+  lr.ended_at AS latest_ended_at
+FROM aggregates a
+LEFT JOIN latest_success ls ON TRUE
+LEFT JOIN latest_run lr ON TRUE;
+
+CREATE OR REPLACE VIEW audit.v_data_quality_batch_metrics AS
+SELECT
+  s.batch_id,
+  r.started_at,
+  r.ended_at,
+  s.table_name,
+  s.total_records,
+  s.total_issues,
+  ROUND((100.0 * s.total_issues / NULLIF(s.total_records, 0))::NUMERIC, 2) AS issue_rate_pct
+FROM audit.data_quality_table_summary s
+LEFT JOIN audit.etl_run_log r
+  ON r.batch_id = s.batch_id;
+
+CREATE OR REPLACE VIEW audit.v_data_quality_issue_metrics AS
+SELECT
+  i.batch_id,
+  r.started_at,
+  r.ended_at,
+  i.created_at,
+  i.table_name,
+  i.column_name,
+  i.description,
+  i.invalid_count
+FROM audit.data_quality_issue_summary i
+LEFT JOIN audit.etl_run_log r
+  ON r.batch_id = i.batch_id;
+
+CREATE OR REPLACE VIEW audit.v_latest_data_quality_summary AS
+WITH latest_batch AS (
+  SELECT batch_id
+  FROM audit.data_quality_table_summary
+  ORDER BY created_at DESC, batch_id DESC
+  LIMIT 1
+)
+SELECT
+  s.batch_id,
+  s.table_name,
+  s.total_records,
+  s.total_issues,
+  ROUND((100.0 * s.total_issues / NULLIF(s.total_records, 0))::NUMERIC, 2) AS issue_rate_pct,
+  s.created_at
+FROM audit.data_quality_table_summary s
+JOIN latest_batch lb
+  ON lb.batch_id = s.batch_id;
+
+CREATE OR REPLACE VIEW audit.v_table_volume AS
+SELECT 'raw.orders'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM raw.orders
+UNION ALL
+SELECT 'raw.customer'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM raw.customer
+UNION ALL
+SELECT 'raw.survey'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM raw.survey
+UNION ALL
+SELECT 'core.orders'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM core.orders
+UNION ALL
+SELECT 'core.customer'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM core.customer
+UNION ALL
+SELECT 'core.survey'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM core.survey;
+
+CREATE OR REPLACE VIEW audit.v_table_freshness AS
+SELECT
+  'raw.orders'::TEXT AS table_name,
+  MAX(ingested_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(ingested_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM raw.orders
+UNION ALL
+SELECT
+  'raw.customer'::TEXT AS table_name,
+  MAX(ingested_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(ingested_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM raw.customer
+UNION ALL
+SELECT
+  'raw.survey'::TEXT AS table_name,
+  MAX(ingested_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(ingested_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM raw.survey
+UNION ALL
+SELECT
+  'core.orders'::TEXT AS table_name,
+  MAX(created_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM core.orders
+UNION ALL
+SELECT
+  'core.customer'::TEXT AS table_name,
+  MAX(created_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM core.customer
+UNION ALL
+SELECT
+  'core.survey'::TEXT AS table_name,
+  MAX(created_at) AS latest_timestamp,
+  ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))::NUMERIC, 2) AS freshness_lag_seconds
+FROM core.survey;
+
 -- =========================
 -- INDEXES
 -- =========================
@@ -121,3 +311,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON core.orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_orders_order_date ON core.orders(order_date);
 CREATE INDEX IF NOT EXISTS idx_survey_customer_id ON core.survey(customer_id);
 CREATE INDEX IF NOT EXISTS idx_survey_order_id ON core.survey(order_id);
+CREATE INDEX IF NOT EXISTS idx_etl_run_log_batch_id ON audit.etl_run_log(batch_id);
+CREATE INDEX IF NOT EXISTS idx_etl_run_log_started_at ON audit.etl_run_log(started_at);
+CREATE INDEX IF NOT EXISTS idx_dq_issue_summary_created_at ON audit.data_quality_issue_summary(created_at);
+CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_at ON audit.data_quality_table_summary(created_at);

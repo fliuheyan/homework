@@ -5,7 +5,7 @@ CREATE SCHEMA IF NOT EXISTS audit;
 -- =========================
 -- RAW
 -- =========================
-CREATE TABLE IF NOT EXISTS raw.orders_raw (
+CREATE TABLE IF NOT EXISTS raw.orders (
   raw_id BIGSERIAL PRIMARY KEY,
   order_date_text TEXT,
   email_text TEXT,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS raw.orders_raw (
   ingested_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS raw.customer_raw (
+CREATE TABLE IF NOT EXISTS raw.customer (
   raw_id BIGSERIAL PRIMARY KEY,
   email_text TEXT,
   birthday_text TEXT,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS raw.customer_raw (
   ingested_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS raw.survey_raw (
+CREATE TABLE IF NOT EXISTS raw.survey (
   raw_id BIGSERIAL PRIMARY KEY,
   respondent_key_text TEXT,
   diet_pref_text TEXT,
@@ -104,9 +104,9 @@ CREATE TABLE IF NOT EXISTS audit.etl_run_log (
   started_at TIMESTAMP,
   ended_at TIMESTAMP,
   status TEXT,
-  rows_orders_raw INT,
-  rows_customer_raw INT,
-  rows_survey_raw INT,
+  rows_orders INT,
+  rows_customer INT,
+  rows_survey INT,
   rows_orders_core INT,
   rows_customer_core INT,
   rows_survey_core INT,

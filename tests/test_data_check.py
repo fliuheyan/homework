@@ -102,8 +102,8 @@ def test_check_survey_flags_invalid_and_non_unique_customer_emails():
 def test_write_report_uses_total_records_and_distinct_bad_rows(tmp_path):
     issue_df = pd.DataFrame(
         [
-            ("raw.orders_raw", "order_date_text", "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)", 1),
-            ("raw.orders_raw", "net_amount_text", "Invalid net amount format (plain number required, no currency symbols)", 1),
+            ("raw.orders", "order_date_text", "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)", 1),
+            ("raw.orders", "net_amount_text", "Invalid net amount format (plain number required, no currency symbols)", 1),
         ],
         columns=["table", "column", "description", "invalid_count"],
     )
@@ -113,18 +113,18 @@ def test_write_report_uses_total_records_and_distinct_bad_rows(tmp_path):
         str(path),
         "BATCH-1",
         {
-            "raw.customer_raw": 0,
-            "raw.orders_raw": 2,
-            "raw.survey_raw": 0,
+            "raw.customer": 0,
+            "raw.orders": 2,
+            "raw.survey": 0,
         },
         issue_df,
         {
-            "raw.customer_raw": set(),
-            "raw.orders_raw": {0},
-            "raw.survey_raw": set(),
+            "raw.customer": set(),
+            "raw.orders": {0},
+            "raw.survey": set(),
         },
     )
 
     content = path.read_text(encoding="utf-8")
     assert "| table | total_records | total_issues |" in content
-    assert "| raw.orders_raw | 2 | 1 |" in content
+    assert "| raw.orders | 2 | 1 |" in content

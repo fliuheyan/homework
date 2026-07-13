@@ -29,9 +29,9 @@ Excel / CSV 原始文件
 
 | 表名 | 说明 |
 |---|---|
-| `raw.orders_raw` | 订单原始数据，字段后缀均为 `_text` |
-| `raw.customer_raw` | 客户原始数据，字段后缀均为 `_text` |
-| `raw.survey_raw` | 问卷原始数据，字段后缀均为 `_text` |
+| `raw.orders` | 订单原始数据，字段后缀均为 `_text` |
+| `raw.customer` | 客户原始数据，字段后缀均为 `_text` |
+| `raw.survey` | 问卷原始数据，字段后缀均为 `_text` |
 
 每张表除业务字段外，均附带以下审计元数据：
 
@@ -69,31 +69,30 @@ Excel / CSV 原始文件
 ```
 # Data Quality Report
 - Generated at: <时间戳>
-- Batch: <批次 ID>
 
 ## Summary by Table
 | table | total_records | total_issues |
 
-## raw.customer_raw
+## raw.customer
 | column | description | invalid_count |
 
-## raw.orders_raw
+## raw.orders
 | column | description | invalid_count |
 
-## raw.survey_raw
+## raw.survey
 | column | description | invalid_count |
 ```
 
 ### 2.2 各表检测字段一览
 
-#### `raw.orders_raw`
+#### `raw.orders`
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
 | `order_date_text` | 日期格式合法性 | 必须为 `YYYY/M/D` 或 `YYYY-MM-DD`，不接受中文、斜线混用等格式 |
 | `net_amount_text` | 金额格式合法性 | 必须为纯数字（允许小数点），不得含货币符号（€ $ £） |
 
-#### `raw.customer_raw`
+#### `raw.customer`
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
@@ -103,7 +102,7 @@ Excel / CSV 原始文件
 | `zip_code_text` | 邮编合法性 | 不得为 NULL / 空字符串，且必须为 4–5 位数字 |
 | `city_text` | 城市字段合法性 | 不得为 NULL / 空字符串，且不得混入邮编 |
 
-#### `raw.survey_raw`
+#### `raw.survey`
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
@@ -120,7 +119,7 @@ Excel / CSV 原始文件
 
 ## 3. 各表具体清洗方案
 
-### 3.1 `raw.orders_raw` → `core.orders`
+### 3.1 `raw.orders` → `core.orders`
 
 #### 已知数据问题
 
@@ -149,7 +148,7 @@ Excel / CSV 原始文件
 
 ---
 
-### 3.2 `raw.customer_raw` → `core.customer`
+### 3.2 `raw.customer` → `core.customer`
 
 #### 已知数据问题
 
@@ -181,7 +180,7 @@ Excel / CSV 原始文件
 
 ---
 
-### 3.3 `raw.survey_raw` → `core.survey`
+### 3.3 `raw.survey` → `core.survey`
 
 #### 已知数据问题
 

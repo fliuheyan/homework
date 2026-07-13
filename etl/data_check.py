@@ -167,7 +167,7 @@ def collect_issue(rows, row_sets, table_name, column_name, description, mask):
 
 
 def check_orders(df):
-    t = "raw.orders_raw"
+    t = "raw.orders"
     rows = []
     row_sets = {t: set()}
 
@@ -185,7 +185,7 @@ def check_orders(df):
 
 
 def check_customer(df):
-    t = "raw.customer_raw"
+    t = "raw.customer"
     rows = []
     row_sets = {t: set()}
 
@@ -221,7 +221,7 @@ def check_customer(df):
 
 
 def check_survey(df, df_customer=None):
-    t = "raw.survey_raw"
+    t = "raw.survey"
     rows = []
     row_sets = {t: set()}
 
@@ -254,7 +254,6 @@ def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
         "# Data Quality Report",
         "",
         f"- Generated at: **{now}**",
-        f"- Batch: **{batch_label}**",
         "",
         "## Summary by Table",
         "",
@@ -262,14 +261,14 @@ def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
         "|---|---:|---:|",
     ]
 
-    for t in ["raw.customer_raw", "raw.orders_raw", "raw.survey_raw"]:
+    for t in ["raw.customer", "raw.orders", "raw.survey"]:
         total_records = int(total_records_map.get(t, 0))
         total_issues = len(bad_rows_map.get(t, set()))
         lines.append(f"| {t} | {total_records} | {total_issues} |")
 
     lines.append("")
 
-    for t in ["raw.customer_raw", "raw.orders_raw", "raw.survey_raw"]:
+    for t in ["raw.customer", "raw.orders", "raw.survey"]:
         lines += [f"## {t}", "", "| column | description | invalid_count |", "|---|---|---:|"]
         sub = issue_df[(issue_df["table"] == t) & (issue_df["invalid_count"] > 0)]
         if sub.empty:
@@ -292,7 +291,7 @@ def main():
         if only_latest:
             batch_id = conn.execute(text("""
                 SELECT batch_id
-                FROM raw.orders_raw
+                FROM raw.orders
                 ORDER BY ingested_at DESC
                 LIMIT 1
             """)).scalar()
@@ -301,14 +300,14 @@ def main():
                 print("[DQ] no data")
                 return
 
-            df_orders = pd.read_sql(text("SELECT * FROM raw.orders_raw WHERE batch_id=:b"), conn, params={"b": batch_id})
-            df_customer = pd.read_sql(text("SELECT * FROM raw.customer_raw WHERE batch_id=:b"), conn, params={"b": batch_id})
-            df_survey = pd.read_sql(text("SELECT * FROM raw.survey_raw WHERE batch_id=:b"), conn, params={"b": batch_id})
+            df_orders = pd.read_sql(text("SELECT * FROM raw.orders WHERE batch_id=:b"), conn, params={"b": batch_id})
+            df_customer = pd.read_sql(text("SELECT * FROM raw.customer WHERE batch_id=:b"), conn, params={"b": batch_id})
+            df_survey = pd.read_sql(text("SELECT * FROM raw.survey WHERE batch_id=:b"), conn, params={"b": batch_id})
             batch_label = str(batch_id)
         else:
-            df_orders = pd.read_sql(text("SELECT * FROM raw.orders_raw"), conn)
-            df_customer = pd.read_sql(text("SELECT * FROM raw.customer_raw"), conn)
-            df_survey = pd.read_sql(text("SELECT * FROM raw.survey_raw"), conn)
+            df_orders = pd.read_sql(text("SELECT * FROM raw.orders"), conn)
+            df_customer = pd.read_sql(text("SELECT * FROM raw.customer"), conn)
+            df_survey = pd.read_sql(text("SELECT * FROM raw.survey"), conn)
             batch_label = "ALL"
 
     issues = []
@@ -325,13 +324,13 @@ def main():
     issue_df = pd.DataFrame(issues, columns=["table", "column", "description", "invalid_count"])
 
     total_records_map = {
-        "raw.orders_raw": len(df_orders),
-        "raw.customer_raw": len(df_customer),
-        "raw.survey_raw": len(df_survey),
+        "raw.orders": len(df_orders),
+        "raw.customer": len(df_customer),
+        "raw.survey": len(df_survey),
     }
-    bad_rows_map["raw.orders_raw"] = order_bad_rows
-    bad_rows_map["raw.customer_raw"] = customer_bad_rows
-    bad_rows_map["raw.survey_raw"] = survey_bad_rows
+    bad_rows_map["raw.orders"] = order_bad_rows
+    bad_rows_map["raw.customer"] = customer_bad_rows
+    bad_rows_map["raw.survey"] = survey_bad_rows
 
     write_report(output_path, batch_label, total_records_map, issue_df, bad_rows_map)
     print(f"[DQ] markdown report generated: {output_path}")

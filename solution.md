@@ -230,3 +230,124 @@ Excel / CSV 原始文件
 ```
 
 > **多次清洗支持**：raw 层数据不变，每次修改 transformer 逻辑后重新运行 `plugin_engine.py` 即可覆盖 core 层，无需重新摄取原始文件。新批次通过 `batch_id` 区分，历史 raw 数据完整保留。
+
+---
+
+## 5. ETL Monitoring Dashboard Design
+
+为更好地监控 ETL Routines 的运行状态，可以在 Grafana 中设计一个统一 dashboard，同时观察 **ETL 流程健康度、数据时效性、数据质量以及数据库健康度**。重点不在可视化样式，而在监控指标是否能够及时暴露失败、延迟、积压、质量下降和数据库瓶颈。
+
+### 5.1 Dashboard 分区
+
+#### A. ETL Process Health
+
+用于判断任务是否稳定、是否按时完成、是否出现积压。
+
+| KPI | 含义 | 监控目的 |
+|---|---|---|
+| End-to-End Runtime | 每个 ETL 批次从 `started_at` 到 `ended_at` 的总耗时 | 判断 ETL 是否变慢 |
+| Job Success Rate | 成功批次数 / 总批次数 | 判断流程稳定性 |
+| In-time Completion Rate | 在 SLA 时间内完成的批次数 / 总批次数 | 判断是否满足业务时效要求 |
+| Backlog Size | 待处理文件数、待处理批次数、失败未重跑任务数 | 判断是否存在积压 |
+| Running / Failed / Pending Job Count | 当前运行中、失败、等待中的任务数量 | 了解当前队列状态 |
+
+其中 `audit.etl_run_log` 可直接提供批次开始时间、结束时间、状态以及各表加载行数，是该区域的核心数据来源。
+
+#### B. Latency / Freshness
+
+用于判断数据是否“新鲜”，是否已经成功送达下游。
+
+| KPI | 含义 | 监控目的 |
+|---|---|---|
+| Last Successful Load Time | 最近一次成功加载时间 | 直观看最新成功批次 |
+| Data Freshness Lag | 当前时间 - 最近一次成功加载时间 | 判断数据是否过旧 |
+| Average Load Time | 历史平均加载耗时 | 观察整体性能趋势 |
+| P95 Load Time | 95 分位加载耗时 | 发现长尾慢任务 |
+| Per-table Load Delay | `orders` / `customer` / `survey` 各表延迟 | 精确定位慢点 |
+
+#### C. Data Quality
+
+用于判断 ETL 产出的数据是否可靠、是否可用于分析。
+
+| KPI | 含义 | 监控目的 |
+|---|---|---|
+| 数据异常率 | 异常记录数 / 总记录数 | 整体质量健康度 |
+| Null Rate | 关键字段空值率 | 发现缺失问题 |
+| Duplicate Rate | 主键或候选键重复率 | 发现去重失败或源数据异常 |
+| Format Error Rate | 日期、金额、email 等格式错误率 | 发现标准化问题 |
+| Referential Integrity Error Rate | 无法关联 `customer` / `orders` 的比例 | 判断数据是否可关联 |
+| Rejected Rows Count | 清洗后被丢弃的记录数 | 判断损耗规模 |
+| Rule Violation Count | 按规则分类统计异常数 | 快速定位问题类型 |
+
+当前项目中的 `etl/data_check.py` 与 `reports/data_quality_report.md` 已经提供了异常扫描基础，可进一步将各类 issue count 写入监控表或直接暴露给 Grafana。
+
+#### D. Database Health
+
+用于判断 ETL 问题是否由数据库资源压力导致。
+
+| KPI | 含义 | 监控目的 |
+|---|---|---|
+| DB CPU / Memory / IOPS / Connections | 数据库资源使用情况 | 判断资源是否紧张 |
+| Slow Query Count | 慢查询数量 | 判断数据库是否成为瓶颈 |
+| Avg Query Time | 平均查询耗时 | 观察查询性能变化 |
+| Deadlock Count | 死锁数量 | 判断并发写入是否存在冲突 |
+| Lock Wait Time / Blocking Sessions | 锁等待时间、阻塞会话数 | 发现卡顿原因 |
+| Disk Usage / Table Growth | 磁盘使用和表增长 | 监控容量风险 |
+| Replication Lag | 主从延迟（如有） | 判断副本同步情况 |
+| Transaction Rollback Rate | 回滚比例 | 判断写入稳定性 |
+
+### 5.2 Dashboard 首页核心 KPI
+
+首页建议展示最关键的 6–8 个指标，用于快速判断当前是否健康：
+
+- 当前 ETL 状态（Healthy / Warning / Critical）
+- 最近一次成功加载时间
+- 今日 Job Success Rate
+- 今日 In-time Completion Rate
+- 当前 Backlog Size
+- Average Runtime
+- P95 Runtime
+- 当前数据异常率
+- 当前 DB Connections / Slow Query Count
+
+### 5.3 告警策略
+
+Dashboard 应结合告警规则，避免只“看板可见”而无法及时响应。以下阈值仅作为起始示例。实际项目中应根据 **ETL 调度频率**、**历史基线** 和 **业务 SLA** 做参数化配置。一个实用的起点如下。时延类告警阈值可先按 `2 * 调度周期` 设定。质量类和成功率类阈值则基于历史表现进行校准。
+
+- 超过 `2 * scheduling_interval` 仍无成功 load：例如每 15 分钟调度一次时，可将阈值设置为 30 分钟，再根据 SLA 与监控结果持续校准
+- Backlog Size 超过阈值
+- Job Success Rate 低于 95%：优先按滚动 24 小时窗口统计；若任务频率较低可按日统计。95% 仅作为起始示例，约等于每 20 次运行允许 1 次失败，实际阈值应结合业务容忍度调整
+- 数据异常率高于 3%：3% 仅作为占位示例；建议按单批次或日维度统计，并参考 `etl/data_check.py` 的历史异常分布，用 p95 异常率加安全边际作为初始阈值
+- DB Connections 使用率超过 80%
+- Slow Query Count 持续升高
+- Deadlock Count 在固定时间窗口内持续高于可接受水平：例如按小时统计；低并发系统可设为 `> 0`，高并发系统应结合事务量调整
+
+### 5.4 Grafana 实现思路
+
+若采用 Grafana，建议拆分为两个数据源：
+
+1. **ETL audit / quality 数据源**
+   - 来源：`audit.etl_run_log`、数据质量检查结果表或质量统计表
+   - 用途：展示 Runtime、Success Rate、Freshness、异常率、Rejected Rows 等 ETL 指标
+
+2. **数据库监控数据源**
+   - 来源：数据库系统视图或 exporter
+   - 用途：展示 CPU、内存、IOPS、连接数、慢查询、死锁、锁等待等数据库指标
+
+Grafana 只负责统一展示与告警，推荐使用：
+
+- **Stat**：展示核心 KPI
+- **Time Series**：展示 Runtime、异常率、慢查询等趋势
+- **Table**：展示失败批次、异常规则明细、慢 SQL 明细
+- **Alert Rules**：对时延、失败率、资源压力做自动告警
+
+### 5.5 设计目标总结
+
+该 dashboard 不应只监控“任务是否执行成功”，而应同时回答以下问题：
+
+1. **流程是否正常跑完**  
+2. **数据是否按时到达**  
+3. **数据质量是否可接受**  
+4. **数据库是否成为瓶颈**
+
+只有同时覆盖这四类问题，dashboard 才能真实反映 **ETL Routines 的当前状态** 与 **数据库当前状态**。

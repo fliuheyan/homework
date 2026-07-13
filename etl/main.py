@@ -5,21 +5,18 @@ from etl.db import get_engine
 from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 
-CUSTOMER_SELECTION_SEED = 0
-
-
-def pick_random_customer_ids_by_email(full_customer_df: pd.DataFrame) -> pd.DataFrame:
-    customer_map = full_customer_df.dropna(subset=["email_norm"]).copy()
+def pick_random_customer_ids_by_email(customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
+    customer_map = customer_df.dropna(subset=["email_norm"]).copy()
     if customer_map.empty:
         return customer_map
 
-    customer_map = customer_map.sample(frac=1, random_state=CUSTOMER_SELECTION_SEED)
+    customer_map = customer_map.sample(frac=1, random_state=random_state)
     customer_map = customer_map.drop_duplicates(subset=["email_norm"], keep="first")
     return customer_map[["customer_id", "email_norm"]]
 
 
-def attach_customer_ids_to_orders(df_orders: pd.DataFrame, full_customer_df: pd.DataFrame) -> pd.DataFrame:
-    customer_map = pick_random_customer_ids_by_email(full_customer_df)
+def attach_customer_ids_to_orders(df_orders: pd.DataFrame, customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
+    customer_map = pick_random_customer_ids_by_email(customer_df, random_state=random_state)
     return df_orders.merge(customer_map, on="email_norm", how="left")
 
 
@@ -92,7 +89,7 @@ def main():
 
         # 6) Link orders to customer_id via email_norm (randomly select one customer_id for duplicate emails)
         with engine.begin() as conn:
-            customer_map = pd.read_sql(text("""
+            customer_df = pd.read_sql(text("""
                 SELECT customer_id, email_norm
                 FROM core.customer
                 WHERE email_norm IS NOT NULL
@@ -103,7 +100,7 @@ def main():
         if missing_orders_cols:
             raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
 
-        df_orders = attach_customer_ids_to_orders(df_orders, customer_map)
+        df_orders = attach_customer_ids_to_orders(df_orders, customer_df)
         df_orders = df_orders.dropna(subset=["customer_id", "order_date", "net_amount", "order_number"])
         df_orders = df_orders.drop_duplicates(subset=["order_number"], keep="first")
 

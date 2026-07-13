@@ -13,7 +13,7 @@ def test_pick_random_customer_ids_by_email_keeps_one_customer_per_email():
         ]
     )
 
-    result = pick_random_customer_ids_by_email(customer_df)
+    result = pick_random_customer_ids_by_email(customer_df, random_state=0)
 
     assert list(result.columns) == ["customer_id", "email_norm"]
     assert len(result) == 2
@@ -38,7 +38,7 @@ def test_attach_customer_ids_to_orders_uses_selected_customer_id():
         ]
     )
 
-    result = attach_customer_ids_to_orders(orders_df, customer_df)
+    result = attach_customer_ids_to_orders(orders_df, customer_df, random_state=0)
 
     dup_customer_id = result.loc[result["order_number"] == "ORD-1", "customer_id"].iloc[0]
     missing_customer_id = result.loc[result["order_number"] == "ORD-2", "customer_id"].iloc[0]

@@ -3,7 +3,7 @@ import pandas as pd
 from etl.data_check import check_customer, check_orders, check_survey, write_report
 
 
-def _counts(rows):
+def _issue_counts(rows):
     return {(column, description): invalid_count for _, column, description, invalid_count in rows}
 
 
@@ -28,7 +28,7 @@ def test_check_customer_detects_requested_issues():
     )
 
     rows, bad_rows = check_customer(df)
-    counts = _counts(rows)
+    counts = _issue_counts(rows)
 
     assert counts[("birthday_text", "Invalid birthday format (expected YYYY-MM-DD)")] == 1
     assert counts[("gender_text", "Invalid gender format (expected male/female)")] == 1
@@ -47,7 +47,7 @@ def test_check_orders_detects_non_canonical_date_and_currency_amount():
     )
 
     rows, bad_rows = check_orders(df)
-    counts = _counts(rows)
+    counts = _issue_counts(rows)
 
     assert counts[("order_date_text", "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)")] == 1
     assert counts[("net_amount_text", "Invalid net amount format (plain number required, no currency symbols)")] == 1
@@ -64,7 +64,7 @@ def test_check_survey_flags_mixed_reference_types():
     )
 
     rows, bad_rows = check_survey(df)
-    counts = _counts(rows)
+    counts = _issue_counts(rows)
 
     assert counts[("respondent_key_text", "Invalid reference format (email or ORD+digits)")] == 1
     assert counts[("respondent_key_text", "Mixed reference types detected (email and order number)")] == 2

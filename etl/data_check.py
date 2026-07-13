@@ -64,7 +64,14 @@ def iso_date_ok(v):
     """Return True when v is a non-null ISO date string in YYYY-MM-DD format."""
     if is_null_like(v):
         return False
-    return bool(ISO_DATE_RE.match(str(v).strip()))
+    x = str(v).strip()
+    if not ISO_DATE_RE.match(x):
+        return False
+    try:
+        datetime.strptime(x, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 
 def order_date_ok(v):

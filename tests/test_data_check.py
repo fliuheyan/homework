@@ -38,6 +38,26 @@ def test_check_customer_detects_requested_issues():
     assert bad_rows == {1}
 
 
+def test_check_customer_rejects_invalid_calendar_dates():
+    df = pd.DataFrame(
+        [
+            {
+                "birthday_text": "2024-02-31",
+                "gender_text": "female",
+                "country_text": "DE",
+                "zip_code_text": "40239",
+                "city_text": "Düsseldorf",
+            }
+        ]
+    )
+
+    rows, bad_rows = check_customer(df)
+    counts = _issue_counts(rows)
+
+    assert counts[("birthday_text", "Invalid birthday format (expected YYYY-MM-DD)")] == 1
+    assert bad_rows == {0}
+
+
 def test_check_orders_detects_non_canonical_date_and_currency_amount():
     df = pd.DataFrame(
         [

@@ -81,7 +81,7 @@ def _format_numeric_cell(value, number_format: str) -> str:
 
 
 def _excel_date_to_text(v, fmt: str) -> str:
-    """将 Excel 日期/时间按 number_format 输出为文本（覆盖常见格式）。"""
+    """将 Excel 日期/时间按 number_format 逐 token 解析，原样输出为文本。"""
     if isinstance(v, datetime):
         dt = v
     elif isinstance(v, date):
@@ -89,28 +89,113 @@ def _excel_date_to_text(v, fmt: str) -> str:
     else:
         return str(v)
 
-    f = (fmt or "").lower()
+    if not fmt or fmt in ("General", "@"):
+        return dt.strftime("%Y-%m-%d")
 
-    # 常见纯日期格式
-    if "yyyy" in f and "mm" in f and "dd" in f and "h" not in f:
-        sep = "/"
-        if "-" in f:
-            sep = "-"
-        elif "." in f:
-            sep = "."
+    # 取正数/日期部分（Excel 以 ; 分隔多段，取第一段）
+    parts = re.split(r";(?![^[]*\])", fmt)
+    pos_fmt = parts[0] if parts else fmt
 
-        # 兼容 m/d 与 mm/dd
-        month = str(dt.month) if "m/" in f or "/m" in f else f"{dt.month:02d}"
-        day = str(dt.day) if "d/" in f or "/d" in f else f"{dt.day:02d}"
-        year = f"{dt.year:04d}"
-        return f"{year}{sep}{month}{sep}{day}"
+    result = []
+    i = 0
+    fl = pos_fmt.lower()
+    last_was_hour = False  # 用于区分 m/mm 是月份还是分钟
 
-    # 带时间
-    if "h" in f:
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    while i < len(pos_fmt):
+        # 引号内的字面文本，原样保留
+        if pos_fmt[i] == '"':
+            end = pos_fmt.find('"', i + 1)
+            if end == -1:
+                end = len(pos_fmt)
+            result.append(pos_fmt[i + 1:end])
+            i = end + 1
+            last_was_hour = False
 
-    # 默认日期
-    return dt.strftime("%Y-%m-%d")
+        # 转义字符
+        elif pos_fmt[i] == '\\':
+            if i + 1 < len(pos_fmt):
+                result.append(pos_fmt[i + 1])
+                i += 2
+            else:
+                i += 1
+            last_was_hour = False
+
+        # [...] 块（颜色、区域、条件），直接跳过
+        elif pos_fmt[i] == '[':
+            end = pos_fmt.find(']', i)
+            i = end + 1 if end != -1 else len(pos_fmt)
+
+        # _ 和 * 对齐/填充符，跳过本字符及下一个字符
+        elif pos_fmt[i] in ('_', '*'):
+            i += 2
+
+        # 年份
+        elif fl[i:i+4] == 'yyyy':
+            result.append(f'{dt.year:04d}')
+            i += 4
+            last_was_hour = False
+        elif fl[i:i+2] == 'yy':
+            result.append(f'{dt.year % 100:02d}')
+            i += 2
+            last_was_hour = False
+
+        # 月份或分钟（紧跟小时 token 时为分钟）
+        elif fl[i:i+2] == 'mm':
+            result.append(f'{dt.minute:02d}' if last_was_hour else f'{dt.month:02d}')
+            i += 2
+            last_was_hour = False
+        elif fl[i] == 'm':
+            result.append(str(dt.minute) if last_was_hour else str(dt.month))
+            i += 1
+            last_was_hour = False
+
+        # 日
+        elif fl[i:i+2] == 'dd':
+            result.append(f'{dt.day:02d}')
+            i += 2
+            last_was_hour = False
+        elif fl[i] == 'd':
+            result.append(str(dt.day))
+            i += 1
+            last_was_hour = False
+
+        # 小时
+        elif fl[i:i+2] == 'hh':
+            result.append(f'{dt.hour:02d}')
+            i += 2
+            last_was_hour = True
+        elif fl[i] == 'h':
+            result.append(str(dt.hour))
+            i += 1
+            last_was_hour = True
+
+        # 秒
+        elif fl[i:i+2] == 'ss':
+            result.append(f'{dt.second:02d}')
+            i += 2
+            last_was_hour = False
+        elif fl[i] == 's':
+            result.append(str(dt.second))
+            i += 1
+            last_was_hour = False
+
+        # AM/PM 标记
+        elif fl[i:i+5] == 'am/pm':
+            result.append('AM' if dt.hour < 12 else 'PM')
+            i += 5
+            last_was_hour = False
+        elif fl[i:i+3] == 'a/p':
+            result.append('A' if dt.hour < 12 else 'P')
+            i += 3
+            last_was_hour = False
+
+        # 其他字符（分隔符 - / . : 空格，以及中文字符等）原样保留
+        # 注意：分隔符不重置 last_was_hour，以便 hh:mm 中的 mm 正确识别为分钟
+        else:
+            result.append(pos_fmt[i])
+            i += 1
+
+    return ''.join(result)
 
 
 def _cell_to_display_text(cell):

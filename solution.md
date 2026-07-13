@@ -2,376 +2,348 @@
 
 ---
 
-## 1. 数据库分层架构
+## 1. 目标与设计原则
 
-数据仓库分为三层，每一层职责明确，支持多次迭代清洗，同时保留完整的原始数据以备溯源与审计。
+本项目围绕一份包含 `orders`、`customer`、`survey` 三个 Sheet 的 Excel 数据，构建一个可重复执行的 ETL 流程，并补充数据质量报告与 Grafana 监控能力。
+
+设计原则如下：
+
+1. **原始数据可追溯**：raw 层保留 Excel 读入时的展示值，不在入库阶段做业务清洗。
+2. **清洗逻辑可重跑**：core 层由插件链生成，允许在不重采原始文件的前提下重复执行。
+3. **质量问题可量化**：`etl/data_check.py` 输出 Markdown 报告，并将质量统计落到 PostgreSQL。
+4. **运行状态可观测**：通过 `audit` 表和视图向 Grafana 暴露批次状态、质量指标、表新鲜度和数据量。
+
+---
+
+## 2. 分层架构
 
 ```
-Excel / CSV 原始文件
-        │
-        ▼
-┌──────────────┐
-│   raw 层     │  原始数据落地，全部字段以 TEXT 存储，不做任何转换
-└──────────────┘
-        │  数据质量检测 (data_check.py) → Data Quality Report (Markdown)
-        ▼
-┌──────────────┐
-│   core 层    │  清洗、标准化后的业务数据，字段类型正确，满足外键约束
-└──────────────┘
-        │
-        ▼
-┌──────────────┐
-│  audit 层    │  ETL 运行日志，记录每次批次的起止时间、行数和错误信息
-└──────────────┘
+Excel / CSV
+    │
+    ▼
+raw 层         原始落地，保留单元格展示文本 + 批次审计字段
+    │
+    ├── data_check.py      生成 Data Quality Report，并写入 audit 质量统计表
+    │
+    ▼
+core 层        通过 transformers 做标准化、关联、去除无法入 core 的记录
+    │
+    ▼
+audit 层       记录 ETL 运行日志、质量汇总，并提供 Grafana 查询视图
 ```
 
-### 1.1 raw 层
+### 2.1 raw 层
 
 | 表名 | 说明 |
 |---|---|
-| `raw.orders` | 订单原始数据，字段后缀均为 `_text` |
-| `raw.customer` | 客户原始数据，字段后缀均为 `_text` |
-| `raw.survey` | 问卷原始数据，字段后缀均为 `_text` |
+| `raw.orders` | 订单原始数据，字段名以 `_text` 结尾 |
+| `raw.customer` | 客户原始数据，字段名以 `_text` 结尾 |
+| `raw.survey` | 问卷原始数据，字段名以 `_text` 结尾 |
 
-每张表除业务字段外，均附带以下审计元数据：
+每张 raw 表都带有以下审计字段：
 
-| 审计字段 | 含义 |
+| 字段 | 说明 |
 |---|---|
 | `source_file` | 来源文件名 |
 | `sheet_name` | 来源 Sheet 名 |
-| `load_time` | 数据加载时间 |
-| `batch_id` | 批次 ID，用于区分不同批次的清洗运行 |
-| `row_num_in_sheet` | 原始文件中的行号，便于回溯问题数据 |
-| `ingested_at` | 写入数据库的时间戳 |
+| `load_time` | 载入时间 |
+| `batch_id` | 本次摄取批次 ID |
+| `row_num_in_sheet` | Excel 中的原始行号 |
+| `ingested_at` | 写入数据库时间 |
 
-> **设计原则**：raw 层数据一旦写入不得修改，后续多次清洗均在 core 层进行，保证数据可追溯。
-
-### 1.2 core 层
+### 2.2 core 层
 
 | 表名 | 说明 |
 |---|---|
-| `core.customer` | 清洗后的客户主数据 |
-| `core.orders` | 清洗后的订单数据，通过 `customer_id` 外键关联客户 |
-| `core.survey` | 清洗后的问卷数据，通过 `customer_id` / `order_id` 关联主数据 |
+| `core.customer` | 标准化后的客户主数据 |
+| `core.orders` | 标准化后的订单数据，依赖 `customer_id` 外键 |
+| `core.survey` | 标准化后的问卷数据，可关联 `customer_id` 或 `order_id` |
 
-### 1.3 audit 层
+### 2.3 audit 层
 
-`audit.etl_run_log` 记录每次 ETL 批次的运行状态，包括各表写入行数、开始/结束时间及异常信息，用于监控和故障排查。
+| 表/视图 | 说明 |
+|---|---|
+| `audit.etl_run_log` | 每次 ETL 批次的开始时间、结束时间、状态、行数与错误信息 |
+| `audit.data_quality_issue_summary` | 字段级质量问题统计 |
+| `audit.data_quality_table_summary` | 表级总记录数与异常记录数 |
+| `audit.v_etl_run_metrics` | 单次运行时长与状态指标 |
+| `audit.v_etl_health_kpis` | 最近状态、成功率、平均时长、P95 时长 |
+| `audit.v_data_quality_batch_metrics` | 每批次每表异常率 |
+| `audit.v_data_quality_issue_metrics` | 字段级质量问题时序 |
+| `audit.v_latest_data_quality_summary` | 最新批次质量快照 |
+| `audit.v_table_volume` | raw/core 当前表行数 |
+| `audit.v_table_freshness` | raw/core 最新时间戳与 freshness lag |
 
 ---
 
-## 2. Data Quality Report
+## 3. 原始摄取方案
 
-数据质量报告由 `etl/data_check.py` 自动生成，输出为 Markdown 文件（默认路径 `/app/reports/data_quality_report.md`）。
+`etl/ingest_raw.py` 的职责是把 Excel 单元格内容按“展示值”尽量原样写入 raw 层，而不是提前标准化。
 
-### 2.1 报告结构
+### 3.1 摄取特点
 
-```
-# Data Quality Report
-- Generated at: <时间戳>
+1. 使用 `openpyxl` 读取单元格值和 `number_format`
+2. 尽量保留 Excel 展示效果，例如：
+   - 中文日期：`2021年8月8日`
+   - 本地化短日期：`2/ Aug/`
+   - 货币后缀：`43.58 €`
+3. 跳过整行全空的记录
+4. 为同一次导入生成统一 `batch_id`
 
-## Summary by Table
-| table | total_records | total_issues |
+### 3.2 为什么 raw 层不做清洗
 
-## raw.customer
-| column | description | invalid_count |
+- 便于追溯源数据问题
+- 避免摄取阶段把格式问题“洗掉”
+- 支持后续只重跑清洗链，不重新导入文件
 
-## raw.orders
-| column | description | invalid_count |
+---
 
-## raw.survey
-| column | description | invalid_count |
-```
+## 4. Data Quality Report 设计
 
-### 2.2 各表检测字段一览
+数据质量报告由 `etl/data_check.py` 生成，默认输出路径为 `/app/reports/data_quality_report.md`。默认只检查最新一个 `batch_id`，同时把统计结果写入 `audit.data_quality_issue_summary` 与 `audit.data_quality_table_summary`。
+
+### 4.1 报告结构
+
+报告包含两部分：
+
+1. **Summary by Table**
+   - `table`
+   - `total_records`
+   - `total_issues`（按“存在任一问题的 distinct 行数”统计）
+2. **各表字段问题明细**
+   - `column`
+   - `description`
+   - `invalid_count`
+
+### 4.2 空值定义
+
+以下值统一按空值处理：
+
+`""`、`null`、`none`、`nan`、`na`、`n/a`、`-`
+
+这些值通常不计入“格式错误”，但会在需要非空的规则中被统计为问题。
+
+### 4.3 各表检查规则
 
 #### `raw.orders`
 
-| 字段 | 检测项 | 检测规则 |
+| 字段 | 检查项 | 规则 |
 |---|---|---|
-| `order_date_text` | 日期格式合法性 | 必须为 `YYYY/M/D` 或 `YYYY-MM-DD`，不接受中文、斜线混用等格式 |
-| `net_amount_text` | 金额格式合法性 | 必须为纯数字（允许小数点），不得含货币符号（€ $ £） |
+| `order_date_text` | 订单日期格式 | 必须是可解析的年在前日期，且原始格式需满足 `YYYY/M/D` 或 `YYYY-MM-DD` |
+| `net_amount_text` | 金额格式 | 必须是不带货币符号的纯数字，允许小数，不允许 `€/$/£/¥/₩` |
 
 #### `raw.customer`
 
-| 字段 | 检测项 | 检测规则 |
+| 字段 | 检查项 | 规则 |
 |---|---|---|
-| `birthday_text` | 日期格式合法性 | 必须为 `YYYY-MM-DD` |
-| `gender_text` | 性别合法值 | 仅接受 `male` / `female`（大小写不敏感） |
-| `country_text` | 国家合法值 | 仅接受 `DE`（大小写不敏感） |
-| `zip_code_text` | 邮编合法性 | 不得为 NULL / 空字符串，且必须为 4–5 位数字 |
-| `city_text` | 城市字段合法性 | 不得为 NULL / 空字符串，且不得混入邮编 |
+| `birthday_text` | 生日格式 | 必须是合法的 `YYYY-MM-DD` 日期 |
+| `gender_text` | 性别值 | 仅接受 `male` / `female` |
+| `country_text` | 国家值 | 仅接受 `DE` |
+| `zip_code_text` | 邮编格式 | 必须为 4–5 位数字，且不能为空 |
+| `city_text` | 城市格式 | 不得为空，且不得夹杂邮编 |
 
 #### `raw.survey`
 
-| 字段 | 检测项 | 检测规则 |
+| 字段 | 检查项 | 规则 |
 |---|---|---|
-| `respondent_key_text` | 键类型与可关联性 | `ORD\d+` 格式的订单号视为合法；若为 email，则必须是合法地址，且标准化后在 `customer` 中只能命中唯一一条记录 |
-| `diet_pref_text` | 非空检测 | 不得为 NULL / 空字符串 |
-
-### 2.3 通用空值定义
-
-以下值均视为空值（`NULL_LIKE`），不计入格式错误，但在空值率统计中单独标记：
-
-`""` / `"null"` / `"none"` / `"nan"` / `"na"` / `"n/a"` / `"-"`
+| `respondent_key_text` | 引用键格式 | 必须是合法 email 或 `ORD` + 数字 |
+| `respondent_key_text` | 客户唯一性 | 若为 email，标准化后在 customer 原始数据中不能命中多个客户 |
+| `diet_pref_text` | 非空检查 | 不得为 NULL / 空字符串 |
 
 ---
 
-## 3. 各表具体清洗方案
+## 5. 清洗与入 core 方案
 
-### 3.1 `raw.orders` → `core.orders`
+`etl/main.py` 会先读取最新批次 raw 数据，再按表发现并执行 `etl/transformers/<table>/` 下的插件，最后重建 core 层结果。
 
-#### 已知数据问题
+### 5.1 `raw.orders` → `core.orders`
 
-| 字段 | 问题描述 | 示例 |
+#### 已知问题
+
+| 字段 | 问题 |
+|---|---|
+| `email_text` | 大小写、首尾空格不一致 |
+| `order_date_text` | 日期格式混杂，含中文、英文月份、缺少年份等 |
+| `net_amount_text` | 可能含 `€` 或空格 |
+| `order_number_text` | 可能不满足 `ORD\d+` |
+
+#### 转换链
+
+| 顺序 | 插件 | 实际处理 |
 |---|---|---|
-| `order_date_text` | 日期格式混乱，包含多种分隔符和中文 | `2021/9/1`、`2/Aug/`、`2021年9月18日` |
-| `net_amount_text` | 金额含欧元符号，部分含空格 | `€12.50`、`12.50`、`12 50` |
-| `email_text` | 大小写不一致 | `User@Example.com` vs `user@example.com` |
-| `order_number_text` | 格式基本统一，但可能存在前缀大小写差异 | `ORD001` vs `ord001` |
+| 1 | `01_normalize_email.py` | `strip()` 后保留到 `email`，并生成小写 `email_norm` |
+| 2 | `02_normalize_order_date.py` | 解析中文日期；对 `2/Aug/` 这类值补默认年份 `2021`；成功后写入 `order_date` |
+| 3 | `03_normalize_net_amount.py` | 去除 `€` 与空格，再转数值 |
+| 4 | `04_normalize_order_number.py` | `strip()` 后校验 `^ORD\d+$`，不合法则置空 |
 
-#### 清洗步骤
+#### 入 core 规则
 
-| 步骤 | 对应转换器 | 操作说明 |
+- 通过 `email_norm` 关联 `core.customer`
+- 无法关联客户的订单会被丢弃
+- `order_date` / `net_amount` / `order_number` 为空的订单会被丢弃
+- `order_number` 重复时仅保留第一条
+- `currency_code` 使用表默认值 `EUR`
+
+### 5.2 `raw.customer` → `core.customer`
+
+#### 已知问题
+
+| 字段 | 问题 |
+|---|---|
+| `email_text` | 大小写、首尾空格不一致 |
+| `birthday_text` | 可能是中文日期或其他可解析格式 |
+| `gender_text` | 存在 `m/f` 等缩写 |
+| `country_text` | 存在 `Deutschland`、`Germany` 等写法 |
+| `city_text` / `zip_code_text` | 城市和邮编可能混写 |
+| `loyalty_score_text` | 文本类型，需要转数值 |
+
+#### 转换链
+
+| 顺序 | 插件 | 实际处理 |
 |---|---|---|
-| 1. 邮箱标准化 | `01_normalize_email.py` | `strip()` 去除首尾空格，`lower()` 统一小写；原始值保留在 `email`，标准化值写入 `email_norm` |
-| 2. 日期解析 | `02_normalize_order_date.py` | 处理中文日期（年月日 → `-`），补全缺失年份（如 `2/Aug/` → `2/Aug/2021`），使用 `dateutil.parser` 宽松解析后写入 `order_date DATE` |
-| 3. 金额清洗 | `03_normalize_net_amount.py` | 去除 `€` 符号和空格，`pd.to_numeric` 转换为 `NUMERIC(12,2)`，无法转换则写 NULL |
-| 4. 订单号标准化 | `04_normalize_order_number.py` | 统一大小写，写入 `order_number TEXT UNIQUE` |
+| 1 | `01_normalize_email.py` | 生成 `email` 与 `email_norm` |
+| 2 | `02_normalize_birthday.py` | 解析生日并写入 `birthday` |
+| 3 | `03_normalize_gender.py` | `m/male → male`，`f/female → female`，其他值置为 `unknown` |
+| 4 | `04_normalize_country.py` | `de/deutschland/germany → DE`，其他非空值取前两位大写 |
+| 5 | `05_normalize_city_zip.py` | 当 `zip_code_text` 为空时，尝试从 `city_text` 抽取 4–5 位邮编；同时写入 `loyalty_score` 数值列 |
 
-#### 核心字段约束（core.orders）
+#### 入 core 规则
 
-- `order_date DATE NOT NULL` — 无法解析的日期行丢弃
-- `net_amount NUMERIC(12,2) NOT NULL` — 无法解析的金额行丢弃
-- `customer_id BIGINT NOT NULL` — 必须能通过 `email_norm` 关联到 `core.customer`
-- `order_number TEXT UNIQUE` — 去重，防止重复写入
+- customer 全量写入 `core.customer`
+- 允许重复 `email_norm`
+- `loyalty_score` 当前仅做数值转换，**未在实现中限制 1–3 值域**（见下文 8.2）
+
+### 5.3 `raw.survey` → `core.survey`
+
+#### 已知问题
+
+| 字段 | 问题 |
+|---|---|
+| `respondent_key_text` | 可能是 email、订单号，也可能是无效值 |
+| `diet_pref_text` | 可能为空，且存在德文值 |
+| `taste_pref_text` | 可能为空，且存在拼写错误 |
+
+#### 转换链
+
+| 顺序 | 插件 | 实际处理 |
+|---|---|---|
+| 1 | `01_normalize_key_type.py` | 识别 `email`、`order_number`、`invalid`，并保留 `respondent_key` |
+| 2 | `02_normalize_diet_pref.py` | 统一小写，将 `vegetarisch` 映射为 `vegetarian` |
+| 3 | `03_normalize_taste_pref.py` | 统一小写，将 `sweeet` 修正为 `sweet` |
+
+#### 入 core 规则
+
+- `key_type = order_number`：通过 `order_number` 关联 `core.orders.order_id`
+- `key_type = email`：通过 `email_norm` 关联 `core.customer.customer_id`
+- 只有 **唯一 email** 才会写入 `customer_id`，重复 email 不关联
+- 无法关联的 survey 记录仍保留，只是外键为空
 
 ---
 
-### 3.2 `raw.customer` → `core.customer`
-
-#### 已知数据问题
-
-| 字段 | 问题描述 | 示例 |
-|---|---|---|
-| `birthday_text` | 日期格式多样，含中文 | `1990-01-01`、`1990年1月1日`、`01/01/1990` |
-| `gender_text` | 缩写与全写混用 | `m`、`male`、`M`、`Female` |
-| `country_text` | 中英文、缩写混用 | `DE`、`Deutschland`、`Germany` |
-| `city_text` | 城市与邮编混写在同一字段 | `Düsseldorf 40239` |
-| `zip_code_text` | 有时为空，邮编混在城市字段中 | （见上） |
-| `loyalty_score_text` | 文本类型，需验证值域 1–3 | `"1"`、`"2"`、`"3"` |
-| `email_text` | 大小写不一致，可能存在重复实体 | `Alice@example.com` vs `alice@example.com` |
-
-#### 清洗步骤
-
-| 步骤 | 对应转换器 | 操作说明 |
-|---|---|---|
-| 1. 邮箱标准化 | `01_normalize_email.py` | 同 orders，`strip()` + `lower()`，写入 `email` / `email_norm` |
-| 2. 生日解析 | `02_normalize_birthday.py` | 中文日期替换（年月日 → `-`），`dateutil.parser` 解析，写入 `birthday DATE` |
-| 3. 性别标准化 | `03_normalize_gender.py` | 映射表：`m/male → male`，`f/female → female`，无法识别则写 `unknown` |
-| 4. 国家标准化 | `04_normalize_country.py` | `DE/Deutschland/Germany → "DE"`（ISO 3166-1 alpha-2），写入 `country_code CHAR(2)` |
-| 5. 城市/邮编拆分 | `05_normalize_city_zip.py` | 正则提取 `city_text` 中的 4–5 位数字作为邮编，剩余部分作为城市名；同时将 `loyalty_score_text` 转为 `SMALLINT` |
-
-#### 核心字段约束（core.customer）
-
-- `email_norm TEXT` — 建有索引 `idx_customer_email_norm`，用于 orders/survey 的关联查询
-- `loyalty_score SMALLINT` — 业务值域 1–3，超出范围写 NULL
-- 城市与邮编分别存储，不再混写
-
----
-
-### 3.3 `raw.survey` → `core.survey`
-
-#### 已知数据问题
-
-| 字段 | 问题描述 | 示例 |
-|---|---|---|
-| `respondent_key_text` | 若使用 email 作为答卷标识，标准化后在客户表中可能命中多条记录，导致关联歧义 | `user@example.com` |
-| `diet_pref_text` | 可能存在空值 | NULL / `""` |
-| `taste_pref_text` | 可能存在空值或不规范值 | NULL / `""` |
-
-#### 清洗步骤
-
-| 步骤 | 对应转换器 | 操作说明 |
-|---|---|---|
-| 1. 键类型识别 | `01_normalize_key_type.py` | 正则判断 `respondent_key` 是 `email`、`order_number` 还是 `invalid`，写入 `key_type TEXT` |
-| 2. 饮食偏好标准化 | `02_normalize_diet_pref.py` | 去除首尾空格，NULL 保留为 NULL |
-| 3. 口味偏好标准化 | `03_normalize_taste_pref.py` | 同上 |
-
-#### 关联逻辑（core.survey）
-
-- `key_type = 'email'` → 通过 `email_norm` 匹配 `core.customer`；仅当标准化后的 email 在客户表中唯一时才填入 `customer_id`
-- `key_type = 'order_number'` → 通过 `order_number` 匹配 `core.orders`，填入 `order_id`
-- `key_type = 'invalid'`，或 email 命中多个客户 → 两个外键均为 NULL，数据保留但标记为无法关联
-
----
-
-## 4. 清洗流程总览
+## 6. ETL 全流程
 
 ```
-原始 Excel
-    │
-    ▼
-[ingest_raw.py]          写入 raw 层（全量 TEXT，带批次元数据）
-    │
-    ▼
-[data_check.py]          扫描 raw 层，生成 Data Quality Report（Markdown）
-    │
-    ▼
-[plugin_engine.py]       按序执行各表 transformers/
-    │   customer: 01~05
-    │   orders:   01~04
-    │   survey:   01~03
-    ▼
-[core 层写入]            清洗结果落地 core.customer / core.orders / core.survey
-    │
-    ▼
-[audit.etl_run_log]      记录本次批次的行数统计与运行状态
+Excel 文件
+   │
+   ▼
+ingest_raw.py
+   │   读取 Sheet -> 写入 raw.* -> 打上 batch_id
+   ▼
+data_check.py
+   │   生成 Markdown 质量报告
+   │   回写 audit.data_quality_* 统计表
+   ▼
+main.py
+   │   读取最新 batch
+   │   发现并执行 transformers
+   │   TRUNCATE core.survey/core.orders/core.customer
+   │   重新写入 core
+   ▼
+audit.etl_run_log
+   │   记录 success/failed、行数、错误信息
+   ▼
+Grafana
 ```
 
-> **多次清洗支持**：raw 层数据不变，每次修改 transformer 逻辑后重新运行 `plugin_engine.py` 即可覆盖 core 层，无需重新摄取原始文件。新批次通过 `batch_id` 区分，历史 raw 数据完整保留。
+### 6.1 当前实现的特点
+
+1. **以最新 batch 为准**：`main.py` 和 `data_check.py` 都默认基于最新 `raw.orders.batch_id`
+2. **core 层是重建式写入**：每次运行会先清空 core，再写回本次结果
+3. **审计完整**：成功与失败都会记录到 `audit.etl_run_log`
 
 ---
 
-## 5. ETL Monitoring Dashboard Design
+## 7. Grafana 监控设计
 
-为更好地监控 ETL Routines 的运行状态，可以在 Grafana 中设计一个统一 dashboard，同时观察 **ETL 流程健康度、数据时效性、数据质量以及数据库健康度**。重点不在可视化样式，而在监控指标是否能够及时暴露失败、延迟、积压、质量下降和数据库瓶颈。
+当前仓库已经提供 Grafana provisioning 文件，并直接查询 PostgreSQL 中的 `audit` 视图。
 
-### 5.1 Dashboard 分区
+### 7.1 已落地的监控主题
 
-#### A. ETL Process Health
+根据 README 与 SQL 视图设计，当前 dashboard 主要覆盖：
 
-用于判断任务是否稳定、是否按时完成、是否出现积压。
-
-| KPI | 含义 | 监控目的 |
-|---|---|---|
-| End-to-End Runtime | 每个 ETL 批次从 `started_at` 到 `ended_at` 的总耗时 | 判断 ETL 是否变慢 |
-| Job Success Rate | 成功批次数 / 总批次数 | 判断流程稳定性 |
-| In-time Completion Rate | 在 SLA 时间内完成的批次数 / 总批次数 | 判断是否满足业务时效要求 |
-| Backlog Size | 待处理文件数、待处理批次数、失败未重跑任务数 | 判断是否存在积压 |
-| Running / Failed / Pending Job Count | 当前运行中、失败、等待中的任务数量 | 了解当前队列状态 |
-
-其中 `audit.etl_run_log` 可直接提供批次开始时间、结束时间、状态以及各表加载行数，是该区域的核心数据来源。
-
-#### B. Latency / Freshness
-
-用于判断数据是否“新鲜”，是否已经成功送达下游。
-
-| KPI | 含义 | 监控目的 |
-|---|---|---|
-| Last Successful Load Time | 最近一次成功加载时间 | 直观看最新成功批次 |
-| Data Freshness Lag | 当前时间 - 最近一次成功加载时间 | 判断数据是否过旧 |
-| Average Load Time | 历史平均加载耗时 | 观察整体性能趋势 |
-| P95 Load Time | 95 分位加载耗时 | 发现长尾慢任务 |
-| Per-table Load Delay | `orders` / `customer` / `survey` 各表延迟 | 精确定位慢点 |
-
-#### C. Data Quality
-
-用于判断 ETL 产出的数据是否可靠、是否可用于分析。
-
-| KPI | 含义 | 监控目的 |
-|---|---|---|
-| 数据异常率 | 异常记录数 / 总记录数 | 整体质量健康度 |
-| Null Rate | 关键字段空值率 | 发现缺失问题 |
-| Duplicate Rate | 主键或候选键重复率 | 发现去重失败或源数据异常 |
-| Format Error Rate | 日期、金额、email 等格式错误率 | 发现标准化问题 |
-| Referential Integrity Error Rate | 无法关联 `customer` / `orders` 的比例 | 判断数据是否可关联 |
-| Rejected Rows Count | 清洗后被丢弃的记录数 | 判断损耗规模 |
-| Rule Violation Count | 按规则分类统计异常数 | 快速定位问题类型 |
-
-当前项目中的 `etl/data_check.py` 与 `reports/data_quality_report.md` 已经提供了异常扫描基础，可进一步将各类 issue count 写入监控表或直接暴露给 Grafana。
-
-#### D. Database Health
-
-用于判断 ETL 问题是否由数据库资源压力导致。
-
-| KPI | 含义 | 监控目的 |
-|---|---|---|
-| DB CPU / Memory / IOPS / Connections | 数据库资源使用情况 | 判断资源是否紧张 |
-| Slow Query Count | 慢查询数量 | 判断数据库是否成为瓶颈 |
-| Avg Query Time | 平均查询耗时 | 观察查询性能变化 |
-| Deadlock Count | 死锁数量 | 判断并发写入是否存在冲突 |
-| Lock Wait Time / Blocking Sessions | 锁等待时间、阻塞会话数 | 发现卡顿原因 |
-| Disk Usage / Table Growth | 磁盘使用和表增长 | 监控容量风险 |
-| Replication Lag | 主从延迟（如有） | 判断副本同步情况 |
-| Transaction Rollback Rate | 回滚比例 | 判断写入稳定性 |
-
-### 5.2 Dashboard 首页核心 KPI
-
-首页建议展示最关键的 6–8 个指标，用于快速判断当前是否健康：
-
-- 当前 ETL 状态（Healthy / Warning / Critical）
-- 最近一次成功加载时间
-- 今日 Job Success Rate
-- 今日 In-time Completion Rate
-- 当前 Backlog Size
+- 最新 ETL 状态
+- Job Success Rate
 - Average Runtime
-- P95 Runtime
-- 当前数据异常率
-- 当前 DB Connections / Slow Query Count
+- Latest Batch Quality Issue Count
+- ETL Runtime Trend
+- Quality Issue Trend
+- Per-table Freshness
+- Raw/Core Table Volume
 
-### 5.3 告警策略
+### 7.2 指标来源映射
 
-Dashboard 应结合告警规则，避免只“看板可见”而无法及时响应。以下阈值仅作为起始示例。实际项目中应根据 **ETL 调度频率**、**历史基线** 和 **业务 SLA** 做参数化配置。一个实用的起点如下。时延类告警阈值可先按 `2 * 调度周期` 设定。质量类和成功率类阈值则基于历史表现进行校准。
+| 监控主题 | 数据来源 |
+|---|---|
+| 运行状态、成功率、平均/P95 时长 | `audit.v_etl_health_kpis` |
+| 单次运行详情 | `audit.v_etl_run_metrics` |
+| 批次质量异常率 | `audit.v_data_quality_batch_metrics` |
+| 字段级质量趋势 | `audit.v_data_quality_issue_metrics` |
+| 最新批次质量总览 | `audit.v_latest_data_quality_summary` |
+| 表体量 | `audit.v_table_volume` |
+| 表新鲜度 | `audit.v_table_freshness` |
 
-- 超过 `2 * scheduling_interval` 仍无成功 load：例如每 15 分钟调度一次时，可将阈值设置为 30 分钟，再根据 SLA 与监控结果持续校准
-- Backlog Size 超过阈值
-- Job Success Rate 低于 95%：优先按滚动 24 小时窗口统计；若任务频率较低可按日统计。95% 仅作为起始示例，约等于每 20 次运行允许 1 次失败，实际阈值应结合业务容忍度调整
-- 数据异常率高于 3%：3% 仅作为占位示例；建议按单批次或日维度统计，并参考 `etl/data_check.py` 的历史异常分布，用 p95 异常率加安全边际作为初始阈值
-- DB Connections 使用率超过 80%
-- Slow Query Count 持续升高
-- Deadlock Count 在固定时间窗口内持续高于可接受水平：例如按小时统计；低并发系统可设为 `> 0`，高并发系统应结合事务量调整
+### 7.3 设计价值
 
-### 5.4 Grafana 实现思路
+这一套 dashboard 可以回答四类核心问题：
 
-若采用 Grafana，建议拆分为两个数据源：
+1. **任务有没有正常跑完**
+2. **数据是不是按批次持续进入系统**
+3. **最新一批数据质量有没有下降**
+4. **raw/core 表的数据量与时效性是否异常**
 
-1. **ETL audit / quality 数据源**
-   - 来源：`audit.etl_run_log`、数据质量检查结果表或质量统计表
-   - 用途：展示 Runtime、Success Rate、Freshness、异常率、Rejected Rows 等 ETL 指标
+---
 
-2. **数据库监控数据源**
-   - 来源：数据库系统视图或 exporter
-   - 用途：展示 CPU、内存、IOPS、连接数、慢查询、死锁、锁等待等数据库指标
+## 8. 当前方案的边界与可优化点
 
-Grafana 只负责统一展示与告警，推荐使用：
+为保证方案说明和代码实现一致，需要明确当前实现仍有以下边界：
 
-- **Stat**：展示核心 KPI
-- **Time Series**：展示 Runtime、异常率、慢查询等趋势
-- **Table**：展示失败批次、异常规则明细、慢 SQL 明细
-- **Alert Rules**：对时延、失败率、资源压力做自动告警
+1. **Data Quality 规则比清洗规则更严格**
+   - 例如 `birthday_text` 质检只接受 `YYYY-MM-DD`
+   - 但清洗阶段仍会尝试解析中文日期或其他可解析格式
 
-### 5.5 设计目标总结
+2. **`loyalty_score` 只做数值化，没有做业务值域约束**
+   - 若需要限制在 1–3，应在 transformer 或入 core 前新增规则
 
-该 dashboard 不应只监控“任务是否执行成功”，而应同时回答以下问题：
+3. **订单号没有统一大小写**
+   - 当前只是 `strip()` 后校验 `^ORD\d+$`
+   - 若源数据可能出现 `ord001`，可增加显式大写标准化
 
-1. **流程是否正常跑完**  
-2. **数据是否按时到达**  
-3. **数据质量是否可接受**  
-4. **数据库是否成为瓶颈**
+4. **customer 允许重复 email**
+   - 这与 survey 的唯一关联策略形成了业务折中：保留原始客户记录，但只对唯一 email 做 survey 关联
 
-只有同时覆盖这四类问题，dashboard 才能真实反映 **ETL Routines 的当前状态** 与 **数据库当前状态**。
+5. **core 采用全量重建**
+   - 当前适合作业场景和小数据量
+   - 若进入生产，应考虑增量合并、幂等写入和更细粒度回滚策略
 
-### 性能优化与完整排查和解决流程
-Phase 0：先定义“慢”和“量大”的标准
-单批 ETL 总时长 > 15 分钟（举例）每批处理记录数 > 过去7天中位数 2 倍
+---
 
-Phase 1：监控定位（Why slow?）
+## 9. 总结
 
-Phase 2: SQL 慢的处理
-从pg_stat_statements中查看最慢的SQL, 
-EXPLAIN (ANALYZE, BUFFERS, VERBOSE) <your_sql>;
-查看执行计划
+本方案的核心不是“把脏数据一次性修好”，而是建立一条 **可追溯、可重跑、可观测** 的 ETL 链路：
 
-是否准确命中了索引
-避免 %like 前缀通配导致索引失效
+- raw 层保留原貌
+- core 层承载可复用的清洗结果
+- audit 层提供运行与质量监控
+- Grafana 将 ETL 健康度、质量和表时效统一展示
 
-Phase 3：数据量过高的处理
-大量数据可以按照id 或者 date进行分区处理，或者分批处理，避免一次性全量处理。
-好处：
-
-查询只扫相关分区
-装载/归档可按分区做
-可做并行处理（分区级并发）
-
-
+这样既能支撑当前作业要求，也为后续继续补充规则、增强监控和演进生产化方案留下了空间。

@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Homework Postgres
+    uid: homework-postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: bi_user
+    secureJsonData:
+      password: bi_pass
+    jsonData:
+      database: bi_db
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+      connMaxLifetime: 14400
+      maxIdleConns: 10
+      maxOpenConns: 100

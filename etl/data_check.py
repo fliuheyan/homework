@@ -282,6 +282,58 @@ def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
         f.write("\n".join(lines))
 
 
+def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map):
+    created_at = datetime.now(UTC)
+    table_records = [
+        {
+            "batch_id": batch_label,
+            "table_name": table_name,
+            "total_records": int(total_records_map.get(table_name, 0)),
+            "total_issues": int(len(bad_rows_map.get(table_name, set()))),
+            "created_at": created_at,
+        }
+        for table_name in ["raw.customer", "raw.orders", "raw.survey"]
+    ]
+
+    issue_records = [
+        {
+            "batch_id": batch_label,
+            "table_name": row["table"],
+            "column_name": row["column"],
+            "description": row["description"],
+            "invalid_count": int(row["invalid_count"]),
+            "created_at": created_at,
+        }
+        for _, row in issue_df.iterrows()
+        if int(row["invalid_count"]) > 0
+    ]
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
+        conn.execute(text("DELETE FROM audit.data_quality_table_summary WHERE batch_id = :b"), {"b": batch_label})
+
+        conn.execute(
+            text("""
+                INSERT INTO audit.data_quality_table_summary
+                    (batch_id, table_name, total_records, total_issues, created_at)
+                VALUES
+                    (:batch_id, :table_name, :total_records, :total_issues, :created_at)
+            """),
+            table_records,
+        )
+
+        if issue_records:
+            conn.execute(
+                text("""
+                    INSERT INTO audit.data_quality_issue_summary
+                        (batch_id, table_name, column_name, description, invalid_count, created_at)
+                    VALUES
+                        (:batch_id, :table_name, :column_name, :description, :invalid_count, :created_at)
+                """),
+                issue_records,
+            )
+
+
 def main():
     engine = get_engine()
     output_path = os.getenv("DQ_REPORT_PATH", REPORT_PATH_DEFAULT)
@@ -333,6 +385,7 @@ def main():
     bad_rows_map["raw.survey"] = survey_bad_rows
 
     write_report(output_path, batch_label, total_records_map, issue_df, bad_rows_map)
+    persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map)
     print(f"[DQ] markdown report generated: {output_path}")
 
 

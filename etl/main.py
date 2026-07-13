@@ -8,6 +8,7 @@ from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 
 def pick_random_customer_ids_by_email(customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
+    """Pick one customer_id per normalized email, randomly when duplicates exist."""
     customer_map = customer_df.dropna(subset=["email_norm"]).copy()
     if customer_map.empty:
         return customer_map
@@ -17,7 +18,8 @@ def pick_random_customer_ids_by_email(customer_df: pd.DataFrame, random_state=No
     return customer_map[["customer_id", "email_norm"]]
 
 
-def get_order_customer_selection_seed():
+def get_order_customer_selection_seed() -> int | None:
+    """Return the optional seed from ORDER_CUSTOMER_SELECTION_SEED."""
     seed = os.getenv("ORDER_CUSTOMER_SELECTION_SEED")
     if seed is None:
         return None
@@ -28,6 +30,7 @@ def get_order_customer_selection_seed():
 
 
 def attach_customer_ids_to_orders(orders_df: pd.DataFrame, customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
+    """Attach customer_id to orders by email_norm using one selected customer per email."""
     customer_map = pick_random_customer_ids_by_email(customer_df, random_state=random_state)
     return orders_df.merge(customer_map, on="email_norm", how="left")
 

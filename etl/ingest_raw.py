@@ -11,6 +11,17 @@ SHEET_TO_RAW_TABLE = {
     "survey":   ("raw", "survey_raw"),
 }
 
+def _to_raw_text(value):
+    """
+    raw 层要求：保持 Excel 原始值语义，不做类型清洗/标准化。
+    - NaN/None -> None（入库为 NULL）
+    - 其他 -> 字符串原样表示
+    """
+    if pd.isna(value):
+        return None
+    return str(value)
+
+
 def add_audit_cols(df, source_file, sheet_name, batch_id):
     df = df.copy()
     df["source_file"] = source_file
@@ -33,6 +44,7 @@ def main():
 
     for file_path in files:
         source_file = os.path.basename(file_path)
+        # 关键修复：按文本读取，避免 pandas 自动把日期/数值改写
         xls = pd.ExcelFile(file_path)
         for sheet in xls.sheet_names:
             sheet_l = sheet.strip().lower()
@@ -40,7 +52,7 @@ def main():
                 continue
 
             schema, table = SHEET_TO_RAW_TABLE[sheet_l]
-            df = pd.read_excel(xls, sheet)
+            df = pd.read_excel(xls, sheet, dtype=str, keep_default_na=False)
 
             if sheet_l == "orders":
                 df = df.iloc[:, :4]
@@ -51,6 +63,11 @@ def main():
             elif sheet_l == "survey":
                 df = df.iloc[:, :3]
                 df.columns = ["respondent_key_text", "diet_pref_text", "taste_pref_text"]
+
+            # 关键修复：raw 文本字段强制字符串透传，禁止隐式格式化
+            text_cols = [c for c in df.columns if c.endswith("_text")]
+            for col in text_cols:
+                df[col] = df[col].map(_to_raw_text)
 
             df = add_audit_cols(df, source_file, sheet, batch_id)
             df.to_sql(table, engine, schema=schema, if_exists="append", index=False)

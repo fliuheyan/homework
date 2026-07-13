@@ -92,11 +92,11 @@ class TestCellToDisplayText:
         result = _cell_to_display_text(_FakeCell(dt, number_format='[$-407]d/\\ mmm/;@'))
         assert result == "2/ Aug/"
 
-    def test_long_date_display_preserved(self):
+    def test_locale_long_date_normalized_to_iso_date(self):
         dt = datetime(2021, 8, 8, 0, 0, 0)
         assert dt.weekday() == 6
         result = _cell_to_display_text(_FakeCell(dt, number_format='[$-F800]dddd\\,\\ mmmm\\ dd\\,\\ yyyy'))
-        assert result == "Sunday, August 08, 2021"
+        assert result == "2021-08-08"
 
     def test_time_only_format_not_forced_to_date(self):
         dt = datetime(2021, 8, 8, 12, 34, 56)
@@ -250,7 +250,15 @@ class TestSheetToTextDf:
         df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "2/ Aug/"
         assert df.iloc[0]["net_amount_text"] == "96.17 €"
-        
+
+    def test_locale_long_date_formats_normalized_in_workbook(self, xlsx_path_with_formats):
+        path = xlsx_path_with_formats(
+            [[datetime(2021, 8, 8, 0, 0, 0), "user@example.com", 43.58, "ORD-001"]],
+            {(2, 1): '[$-F800]dddd\\,\\ mmmm\\ dd\\,\\ yyyy'},
+        )
+        df = _sheet_to_text_df(path, "orders", COLS)
+        assert df.iloc[0]["order_date_text"] == "2021-08-08"
+         
     def test_preformatted_text_cells_preserved(self, xlsx_path):
         path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
         df = _sheet_to_text_df(path, "orders", COLS)

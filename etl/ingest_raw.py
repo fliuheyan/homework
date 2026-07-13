@@ -189,6 +189,10 @@ def _render_datetime_with_excel_format(v: datetime, section: str) -> str:
     return "".join(rendered)
 
 
+def _is_locale_dependent_long_date_format(section: str) -> bool:
+    return "[$-f800]" in section.lower()
+
+
 def _cell_to_display_text(cell):
     """Return Excel-like display text for raw ingestion."""
     v = cell.value
@@ -211,6 +215,8 @@ def _cell_to_display_text(cell):
             re.search(r"(h+|s+)", clean_fmt)
         )
         if has_date_tokens or has_time_tokens:
+            if _is_locale_dependent_long_date_format(first_section) and not has_time_tokens:
+                return v.strftime("%Y-%m-%d")
             return _render_datetime_with_excel_format(v, first_section)
         return str(v)
 

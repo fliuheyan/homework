@@ -12,9 +12,12 @@ NULL_LIKE = {"", "null", "none", "nan", "na", "n/a", "-"}
 
 EMAIL_REGEX = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 ORDER_NO_REGEX = re.compile(r"^ORD\d+$", re.IGNORECASE)
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+ZIP_CODE_RE = re.compile(r"^\d{4,5}$")
+CITY_ZIP_RE = re.compile(r"\b\d{4,5}\b")
 
-VALID_GENDER = {"male", "female", "m", "f"}
-VALID_COUNTRY = {"de", "deutschland", "germany"}
+VALID_GENDER = {"male", "female"}
+VALID_COUNTRY = {"de"}
 
 
 def is_datetime_like(v):
@@ -57,6 +60,12 @@ def date_ok(v):
     return not pd.isna(d)
 
 
+def iso_date_ok(v):
+    if is_null_like(v):
+        return False
+    return bool(ISO_DATE_RE.match(str(v).strip()))
+
+
 def order_date_ok(v):
     """Accepts datetime objects or year-first date strings with consistent separators, e.g. 2021/9/1 or 2021-09-01."""
     if is_datetime_like(v):
@@ -90,82 +99,120 @@ def amount_ok(v):
 
 
 def city_ok(v):
-    return not is_null_like(v)
+    if is_null_like(v):
+        return False
+    return not bool(CITY_ZIP_RE.search(str(v).strip()))
+
+
+def zip_code_ok(v):
+    if is_null_like(v):
+        return False
+    return bool(ZIP_CODE_RE.match(str(v).strip()))
+
+
+def reference_kind(v):
+    if is_null_like(v):
+        return "null"
+    x = str(v).strip()
+    if EMAIL_REGEX.match(x):
+        return "email"
+    if ORDER_NO_REGEX.match(x):
+        return "order_number"
+    return "invalid"
 
 
 def reference_ok(v):
-    if is_null_like(v):
-        return False
-    x = str(v).strip()
-    return bool(EMAIL_REGEX.match(x) or ORDER_NO_REGEX.match(x))
+    return reference_kind(v) in {"email", "order_number"}
+
+
+def collect_issue(rows, row_sets, table_name, column_name, description, mask):
+    invalid_count = int(mask.sum())
+    rows.append((table_name, column_name, description, invalid_count))
+    if invalid_count:
+        row_sets.setdefault(table_name, set()).update(mask[mask].index.tolist())
 
 
 def check_orders(df):
     t = "raw.orders_raw"
     rows = []
+    row_sets = {t: set()}
 
     c_date = safe_col(df, ["order_date_text", "order_date"])
     c_amt = safe_col(df, ["net_amount_text", "net_amount"])
 
     if c_date:
         m = (~df[c_date].apply(order_date_ok)) & (~df[c_date].apply(is_null_like))
-        rows.append((t, c_date, "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_date, "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)", m)
     if c_amt:
         m = (~df[c_amt].apply(amount_ok)) & (~df[c_amt].apply(is_null_like))
-        rows.append((t, c_amt, "Invalid net amount format (plain number required, no currency symbols)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_amt, "Invalid net amount format (plain number required, no currency symbols)", m)
 
-    return rows
+    return rows, row_sets[t]
 
 
 def check_customer(df):
     t = "raw.customer_raw"
     rows = []
+    row_sets = {t: set()}
 
     c_bday = safe_col(df, ["birthday_text", "birthday"])
     c_gender = safe_col(df, ["gender_text", "gender"])
     c_country = safe_col(df, ["country_text", "country"])
+    c_zip = safe_col(df, ["zip_code_text", "zip_code"])
     c_city = safe_col(df, ["city_text", "city"])
 
     if c_bday:
-        m = (~df[c_bday].apply(date_ok)) & (~df[c_bday].apply(is_null_like))
-        rows.append((t, c_bday, "Invalid birthday format", int(m.sum())))
+        m = (~df[c_bday].apply(iso_date_ok)) & (~df[c_bday].apply(is_null_like))
+        collect_issue(rows, row_sets, t, c_bday, "Invalid birthday format (expected YYYY-MM-DD)", m)
 
     if c_gender:
         s = df[c_gender].astype("string").fillna("").str.strip().str.lower()
         m = (~s.isin(VALID_GENDER)) & (~df[c_gender].apply(is_null_like))
-        rows.append((t, c_gender, "Invalid gender format (male/female/m/f)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_gender, "Invalid gender format (expected male/female)", m)
 
     if c_country:
         s = df[c_country].astype("string").fillna("").str.strip().str.lower()
         m = (~s.isin(VALID_COUNTRY)) & (~df[c_country].apply(is_null_like))
-        rows.append((t, c_country, "Invalid country format (DE/Deutschland/Germany)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_country, "Invalid country format (expected DE)", m)
+
+    if c_zip:
+        m = ~df[c_zip].apply(zip_code_ok)
+        collect_issue(rows, row_sets, t, c_zip, "Invalid zip code format (NULL/blank or not 4-5 digits)", m)
 
     if c_city:
         m = ~df[c_city].apply(city_ok)
-        rows.append((t, c_city, "Invalid city format (NULL/blank)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_city, "Invalid city format (NULL/blank or contains zip code)", m)
 
-    return rows
+    return rows, row_sets[t]
 
 
 def check_survey(df):
     t = "raw.survey_raw"
     rows = []
+    row_sets = {t: set()}
 
     c_ref = safe_col(df, ["respondent_key_text", "reference"])
     c_nut = safe_col(df, ["diet_pref_text", "nutrition"])
 
     if c_ref:
         m = (~df[c_ref].apply(reference_ok)) & (~df[c_ref].apply(is_null_like))
-        rows.append((t, c_ref, "Invalid reference format (email or ORD+digits)", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_ref, "Invalid reference format (email or ORD+digits)", m)
+
+        kinds = df[c_ref].apply(reference_kind)
+        has_email = (kinds == "email").any()
+        has_order = (kinds == "order_number").any()
+        if has_email and has_order:
+            m = kinds.isin({"email", "order_number"})
+            collect_issue(rows, row_sets, t, c_ref, "Mixed reference types detected (email and order number)", m)
 
     if c_nut:
         m = df[c_nut].apply(is_null_like)
-        rows.append((t, c_nut, "Nutrition is NULL/blank", int(m.sum())))
+        collect_issue(rows, row_sets, t, c_nut, "Nutrition is NULL/blank", m)
 
-    return rows
+    return rows, row_sets[t]
 
 
-def write_report(path, batch_label, checks_map, issue_df):
+def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -177,15 +224,14 @@ def write_report(path, batch_label, checks_map, issue_df):
         "",
         "## Summary by Table",
         "",
-        "| table | checks | total_issues |",
+        "| table | total_records | total_issues |",
         "|---|---:|---:|",
     ]
 
     for t in ["raw.customer_raw", "raw.orders_raw", "raw.survey_raw"]:
-        checks = int(checks_map.get(t, 0))
-        sub = issue_df[issue_df["table"] == t]
-        total_issues = int(sub["invalid_count"].sum()) if not sub.empty else 0
-        lines.append(f"| {t} | {checks} | {total_issues} |")
+        total_records = int(total_records_map.get(t, 0))
+        total_issues = len(bad_rows_map.get(t, set()))
+        lines.append(f"| {t} | {total_records} | {total_issues} |")
 
     lines.append("")
 
@@ -232,19 +278,28 @@ def main():
             batch_label = "ALL"
 
     issues = []
-    issues += check_orders(df_orders)
-    issues += check_customer(df_customer)
-    issues += check_survey(df_survey)
+    bad_rows_map = {}
+
+    order_issues, order_bad_rows = check_orders(df_orders)
+    customer_issues, customer_bad_rows = check_customer(df_customer)
+    survey_issues, survey_bad_rows = check_survey(df_survey)
+
+    issues += order_issues
+    issues += customer_issues
+    issues += survey_issues
 
     issue_df = pd.DataFrame(issues, columns=["table", "column", "description", "invalid_count"])
 
-    checks_map = {
+    total_records_map = {
         "raw.orders_raw": len(df_orders),
         "raw.customer_raw": len(df_customer),
         "raw.survey_raw": len(df_survey),
     }
+    bad_rows_map["raw.orders_raw"] = order_bad_rows
+    bad_rows_map["raw.customer_raw"] = customer_bad_rows
+    bad_rows_map["raw.survey_raw"] = survey_bad_rows
 
-    write_report(output_path, batch_label, checks_map, issue_df)
+    write_report(output_path, batch_label, total_records_map, issue_df, bad_rows_map)
     print(f"[DQ] markdown report generated: {output_path}")
 
 

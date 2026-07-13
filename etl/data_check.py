@@ -18,6 +18,10 @@ CITY_ZIP_RE = re.compile(r"\b\d{4,5}\b")
 
 VALID_GENDER = {"male", "female"}
 VALID_COUNTRY = {"de"}
+REFERENCE_KIND_NULL = "null"
+REFERENCE_KIND_EMAIL = "email"
+REFERENCE_KIND_ORDER = "order_number"
+REFERENCE_KIND_INVALID = "invalid"
 
 
 def is_datetime_like(v):
@@ -61,7 +65,7 @@ def date_ok(v):
 
 
 def iso_date_ok(v):
-    """Return True when v is a non-null ISO date string in YYYY-MM-DD format."""
+    """Return True when v is a non-null date string in YYYY-MM-DD format."""
     if is_null_like(v):
         return False
     x = str(v).strip()
@@ -122,17 +126,17 @@ def zip_code_ok(v):
 def reference_kind(v):
     """Classify respondent keys as null, email, order_number, or invalid."""
     if is_null_like(v):
-        return "null"
+        return REFERENCE_KIND_NULL
     x = str(v).strip()
     if EMAIL_REGEX.match(x):
-        return "email"
+        return REFERENCE_KIND_EMAIL
     if ORDER_NO_REGEX.match(x):
-        return "order_number"
-    return "invalid"
+        return REFERENCE_KIND_ORDER
+    return REFERENCE_KIND_INVALID
 
 
 def reference_ok(v):
-    return reference_kind(v) in {"email", "order_number"}
+    return reference_kind(v) in {REFERENCE_KIND_EMAIL, REFERENCE_KIND_ORDER}
 
 
 def collect_issue(rows, row_sets, table_name, column_name, description, mask):
@@ -210,11 +214,11 @@ def check_survey(df):
         collect_issue(rows, row_sets, t, c_ref, "Invalid reference format (email or ORD+digits)", m)
 
         kinds = df[c_ref].apply(reference_kind)
-        has_email = (kinds == "email").any()
-        has_order = (kinds == "order_number").any()
+        has_email = (kinds == REFERENCE_KIND_EMAIL).any()
+        has_order = (kinds == REFERENCE_KIND_ORDER).any()
         if has_email and has_order:
-            m = kinds.isin({"email", "order_number"})
-            collect_issue(rows, row_sets, t, c_ref, "Mixed reference types detected (email and order number)", m)
+            mixed_type_mask = kinds.isin({REFERENCE_KIND_EMAIL, REFERENCE_KIND_ORDER})
+            collect_issue(rows, row_sets, t, c_ref, "Mixed reference types detected (email and order number)", mixed_type_mask)
 
     if c_nut:
         m = df[c_nut].apply(is_null_like)

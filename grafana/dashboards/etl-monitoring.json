@@ -586,7 +586,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(started_at, created_at) AS time, issue_rate_pct AS value, table_name AS metric FROM audit.v_data_quality_batch_metrics ORDER BY 1, 3;",
+          "rawSql": "SELECT COALESCE(started_at, created_at) AS time, issue_rate_pct AS value, table_name AS metric FROM audit.v_data_quality_batch_metrics ORDER BY time, metric;",
           "refId": "A"
         }
       ],
@@ -638,7 +638,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(started_at, created_at) AS time, invalid_count AS value, table_name || ':' || column_name AS metric FROM audit.v_data_quality_issue_metrics ORDER BY 1, 3;",
+          "rawSql": "SELECT COALESCE(started_at, created_at) AS time, invalid_count AS value, table_name || ':' || column_name AS metric FROM audit.v_data_quality_issue_metrics ORDER BY time, metric;",
           "refId": "A"
         }
       ],

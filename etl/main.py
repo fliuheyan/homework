@@ -6,7 +6,7 @@ from etl.db import get_engine
 from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 
-def maybe_record_duration(step_durations, key, started_at):
+def set_duration_once(step_durations, key, started_at):
     if started_at is not None and step_durations[key] is None:
         step_durations[key] = round(perf_counter() - started_at, 4)
 
@@ -94,7 +94,7 @@ def main():
                 text("SELECT * FROM raw.survey WHERE batch_id = :b"),
                 conn, params={"b": batch_id}
             )
-        maybe_record_duration(step_durations, "extract_duration_seconds", extract_started)
+        set_duration_once(step_durations, "extract_duration_seconds", extract_started)
 
         # 3) 自动发现插件并执行（按文件名字典序）
         transform_started = perf_counter()
@@ -127,7 +127,7 @@ def main():
         missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]
         if missing_survey_cols:
             raise ValueError(f"survey plugins output missing columns: {missing_survey_cols}")
-        maybe_record_duration(step_durations, "transform_duration_seconds", transform_started)
+        set_duration_once(step_durations, "transform_duration_seconds", transform_started)
 
         load_started = perf_counter()
         with engine.begin() as conn:
@@ -191,7 +191,7 @@ def main():
                 "rcc": conn.execute(text("SELECT COUNT(*) FROM core.customer")).scalar(),
                 "rsc": conn.execute(text("SELECT COUNT(*) FROM core.survey")).scalar(),
             }
-            maybe_record_duration(step_durations, "load_duration_seconds", load_started)
+            set_duration_once(step_durations, "load_duration_seconds", load_started)
 
             conn.execute(text("""
                 UPDATE audit.etl_run_log
@@ -212,9 +212,9 @@ def main():
         print(f"Pipeline finished successfully. batch_id={batch_id}")
 
     except Exception as e:
-        maybe_record_duration(step_durations, "extract_duration_seconds", extract_started)
-        maybe_record_duration(step_durations, "transform_duration_seconds", transform_started)
-        maybe_record_duration(step_durations, "load_duration_seconds", load_started)
+        set_duration_once(step_durations, "extract_duration_seconds", extract_started)
+        set_duration_once(step_durations, "transform_duration_seconds", transform_started)
+        set_duration_once(step_durations, "load_duration_seconds", load_started)
         with engine.begin() as conn:
             conn.execute(text("""
                 UPDATE audit.etl_run_log

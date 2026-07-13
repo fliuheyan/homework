@@ -41,7 +41,8 @@ def safe_col(df, names):
     return None
 
 
-_PG_DATE_RE = re.compile(r"^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}$")
+_PG_DATE_RE = re.compile(r"^\d{4}([/\-])\d{1,2}\1\d{1,2}$")
+_CURRENCY_RE = re.compile(r"[€$£¥₩]")
 
 
 def date_ok(v):
@@ -57,7 +58,7 @@ def date_ok(v):
 
 
 def order_date_ok(v):
-    """Accepts only PostgreSQL-compatible year-first date strings, e.g. 2021/9/1 or 2021-09-01."""
+    """Accepts datetime objects or year-first date strings with consistent separators, e.g. 2021/9/1 or 2021-09-01."""
     if is_datetime_like(v):
         return True
     if is_null_like(v):
@@ -76,7 +77,7 @@ def amount_ok(v):
         return True
     x = str(v).strip()
     # Currency symbols are not allowed; reject anything containing them
-    if re.search(r"[€$£¥₩]", x):
+    if _CURRENCY_RE.search(x):
         return False
     x = x.replace(" ", "").replace(",", ".")
     if not re.match(r"^-?\d+(\.\d{1,2})?$", x):

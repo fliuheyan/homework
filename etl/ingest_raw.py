@@ -29,6 +29,8 @@ RAW_COLUMNS = {
     "survey": ["respondent_key_text", "diet_pref_text", "taste_pref_text"],
 }
 
+CURRENCY_SYMBOLS = ["€", "$", "£", "¥", "₩"]
+
 
 def _strip_excel_literals(fmt: str) -> str:
     out = []
@@ -61,6 +63,7 @@ def _cell_to_display_text(cell):
     fmt = (cell.number_format or "").lower()
 
     if isinstance(v, datetime):
+        # Handle explicit Chinese-style date display observed in source files.
         if ("年" in fmt) and ("月" in fmt) and ("日" in fmt):
             return f"{v.year}年{v.month}月{v.day}日"
         has_date_tokens = any(t in fmt for t in ["y", "d"])
@@ -72,8 +75,7 @@ def _cell_to_display_text(cell):
         return str(v)
 
     if isinstance(v, (int, float, Decimal)):
-        symbols = ["€", "$", "£", "¥", "₩"]
-        symbol = next((s for s in symbols if s in (cell.number_format or "")), None)
+        symbol = next((s for s in CURRENCY_SYMBOLS if s in (cell.number_format or "")), None)
         if symbol:
             raw_fmt = cell.number_format or ""
             section = _strip_excel_literals(raw_fmt.split(";")[0])
@@ -86,7 +88,11 @@ def _cell_to_display_text(cell):
                     else:
                         break
             number = f"{float(v):.{decimals}f}"
-            placeholder_positions = [section.find(ch) for ch in ("#", "0") if section.find(ch) != -1]
+            placeholder_positions = []
+            for ch in ("#", "0"):
+                pos = section.find(ch)
+                if pos != -1:
+                    placeholder_positions.append(pos)
             first_placeholder = min(placeholder_positions) if placeholder_positions else len(section) + 1
             symbol_pos = section.find(symbol)
             if symbol_pos < first_placeholder:

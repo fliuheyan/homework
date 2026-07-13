@@ -83,6 +83,7 @@ class TestCellToDisplayText:
     def test_time_only_format_not_forced_to_date(self):
         dt = datetime(2021, 8, 8, 12, 34, 56)
         result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
+        # Time-only format should not be mistaken as a date-only value.
         assert result == str(dt)
 
     def test_no_whitespace_trimming(self):
@@ -203,4 +204,5 @@ class TestSheetToTextDf:
             try:
                 os.unlink(path)
             except OSError:
+                # Temp cleanup failure should not affect assertion semantics.
                 pass

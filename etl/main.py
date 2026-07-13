@@ -6,6 +6,7 @@ from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 
 def refresh_customer_monthly_order_summary(conn, batch_id):
+    """Refresh monthly order totals for one ETL batch inside the active transaction."""
     try:
         conn.execute(
             text("DELETE FROM audit.customer_monthly_order_summary WHERE batch_id = :b"),
@@ -36,7 +37,9 @@ def refresh_customer_monthly_order_summary(conn, batch_id):
                 DATE_TRUNC('month', o.order_date)::DATE
         """), {"b": batch_id})
     except Exception as exc:
-        raise RuntimeError("Failed to refresh audit.customer_monthly_order_summary") from exc
+        raise RuntimeError(
+            f"Failed to refresh audit.customer_monthly_order_summary for batch {batch_id}"
+        ) from exc
 
 
 def main():

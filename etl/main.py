@@ -1,8 +1,14 @@
 import pandas as pd
 from sqlalchemy import text
+from time import perf_counter
 
 from etl.db import get_engine
 from etl.plugin_engine import discover_plugins_for_table, run_plugins
+
+
+def record_step_duration_if_not_set(step_durations, key, started_at):
+    if started_at is not None and step_durations[key] is None:
+        step_durations[key] = round(perf_counter() - started_at, 4)
 
 
 def refresh_customer_monthly_order_summary(conn, batch_id):
@@ -44,6 +50,14 @@ def refresh_customer_monthly_order_summary(conn, batch_id):
 
 def main():
     engine = get_engine()
+    step_durations = {
+        "extract_duration_seconds": None,
+        "transform_duration_seconds": None,
+        "load_duration_seconds": None,
+    }
+    extract_started = None
+    transform_started = None
+    load_started = None
 
     # 1) 找到最新 batch_id（以 orders 为基准；如需更严谨可做三表交集校验）
     with engine.begin() as conn:
@@ -66,51 +80,60 @@ def main():
 
     try:
         # 2) 读取 raw（仅本次 batch）
-        with engine.begin() as conn:
-            df_orders = pd.read_sql(
-                text("SELECT * FROM raw.orders WHERE batch_id = :b"),
-                conn, params={"b": batch_id}
-            )
-            df_customer = pd.read_sql(
-                text("SELECT * FROM raw.customer WHERE batch_id = :b"),
-                conn, params={"b": batch_id}
-            )
-            df_survey = pd.read_sql(
-                text("SELECT * FROM raw.survey WHERE batch_id = :b"),
-                conn, params={"b": batch_id}
-            )
+        extract_started = perf_counter()
+        try:
+            with engine.begin() as conn:
+                df_orders = pd.read_sql(
+                    text("SELECT * FROM raw.orders WHERE batch_id = :b"),
+                    conn, params={"b": batch_id}
+                )
+                df_customer = pd.read_sql(
+                    text("SELECT * FROM raw.customer WHERE batch_id = :b"),
+                    conn, params={"b": batch_id}
+                )
+                df_survey = pd.read_sql(
+                    text("SELECT * FROM raw.survey WHERE batch_id = :b"),
+                    conn, params={"b": batch_id}
+                )
+        finally:
+            record_step_duration_if_not_set(step_durations, "extract_duration_seconds", extract_started)
 
         # 3) 自动发现插件并执行（按文件名字典序）
-        orders_plugins = discover_plugins_for_table("orders")
-        customer_plugins = discover_plugins_for_table("customer")
-        survey_plugins = discover_plugins_for_table("survey")
+        transform_started = perf_counter()
+        try:
+            orders_plugins = discover_plugins_for_table("orders")
+            customer_plugins = discover_plugins_for_table("customer")
+            survey_plugins = discover_plugins_for_table("survey")
 
-        print("orders plugins:", orders_plugins)
-        print("customer plugins:", customer_plugins)
-        print("survey plugins:", survey_plugins)
+            print("orders plugins:", orders_plugins)
+            print("customer plugins:", customer_plugins)
+            print("survey plugins:", survey_plugins)
 
-        df_orders = run_plugins(df_orders, orders_plugins)
-        df_customer = run_plugins(df_customer, customer_plugins)
-        df_survey = run_plugins(df_survey, survey_plugins)
+            df_orders = run_plugins(df_orders, orders_plugins)
+            df_customer = run_plugins(df_customer, customer_plugins)
+            df_survey = run_plugins(df_survey, survey_plugins)
 
-        customer_required_cols = [
-            "email", "email_norm", "birthday", "gender",
-            "country_code", "zip_code", "city", "loyalty_score"
-        ]
-        missing_customer_cols = [c for c in customer_required_cols if c not in df_customer.columns]
-        if missing_customer_cols:
-            raise ValueError(f"customer plugins output missing columns: {missing_customer_cols}")
+            customer_required_cols = [
+                "email", "email_norm", "birthday", "gender",
+                "country_code", "zip_code", "city", "loyalty_score"
+            ]
+            missing_customer_cols = [c for c in customer_required_cols if c not in df_customer.columns]
+            if missing_customer_cols:
+                raise ValueError(f"customer plugins output missing columns: {missing_customer_cols}")
 
-        orders_required_cols = ["order_number", "email_norm", "order_date", "net_amount"]
-        missing_orders_cols = [c for c in orders_required_cols if c not in df_orders.columns]
-        if missing_orders_cols:
-            raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
+            orders_required_cols = ["order_number", "email_norm", "order_date", "net_amount"]
+            missing_orders_cols = [c for c in orders_required_cols if c not in df_orders.columns]
+            if missing_orders_cols:
+                raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
 
-        survey_required_cols = ["respondent_key", "key_type", "diet_pref", "taste_pref"]
-        missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]
-        if missing_survey_cols:
-            raise ValueError(f"survey plugins output missing columns: {missing_survey_cols}")
+            survey_required_cols = ["respondent_key", "key_type", "diet_pref", "taste_pref"]
+            missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]
+            if missing_survey_cols:
+                raise ValueError(f"survey plugins output missing columns: {missing_survey_cols}")
+        finally:
+            record_step_duration_if_not_set(step_durations, "transform_duration_seconds", transform_started)
 
+        load_started = perf_counter()
         with engine.begin() as conn:
             # 4) Rebuild core tables in one transaction
             conn.execute(text("TRUNCATE core.survey, core.orders, core.customer RESTART IDENTITY CASCADE"))
@@ -172,6 +195,7 @@ def main():
                 "rcc": conn.execute(text("SELECT COUNT(*) FROM core.customer")).scalar(),
                 "rsc": conn.execute(text("SELECT COUNT(*) FROM core.survey")).scalar(),
             }
+            record_step_duration_if_not_set(step_durations, "load_duration_seconds", load_started)
 
             conn.execute(text("""
                 UPDATE audit.etl_run_log
@@ -182,21 +206,28 @@ def main():
                     rows_survey = :rsr,
                     rows_orders_core = :roc,
                     rows_customer_core = :rcc,
-                    rows_survey_core = :rsc
+                    rows_survey_core = :rsc,
+                    extract_duration_seconds = :extract_duration_seconds,
+                    transform_duration_seconds = :transform_duration_seconds,
+                    load_duration_seconds = :load_duration_seconds
                 WHERE run_id = :rid
-            """), {**stats, "rid": run_id})
+            """), {**stats, **step_durations, "rid": run_id})
 
         print(f"Pipeline finished successfully. batch_id={batch_id}")
 
     except Exception as e:
+        record_step_duration_if_not_set(step_durations, "load_duration_seconds", load_started)
         with engine.begin() as conn:
             conn.execute(text("""
                 UPDATE audit.etl_run_log
                 SET ended_at = now(),
                     status = 'failed',
-                    error_message = :err
+                    error_message = :err,
+                    extract_duration_seconds = :extract_duration_seconds,
+                    transform_duration_seconds = :transform_duration_seconds,
+                    load_duration_seconds = :load_duration_seconds
                 WHERE run_id = :rid
-            """), {"err": str(e), "rid": run_id})
+            """), {"err": str(e), **step_durations, "rid": run_id})
         raise
 
 

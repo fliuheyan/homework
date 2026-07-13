@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS audit.customer_monthly_order_summary (
   order_count INT NOT NULL,
   total_net_amount NUMERIC(14,2) NOT NULL,
   refreshed_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (customer_id, order_month)
+  PRIMARY KEY (batch_id, customer_id, order_month)
 );
 
 CREATE OR REPLACE VIEW audit.v_etl_run_metrics AS

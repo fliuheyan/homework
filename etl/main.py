@@ -158,11 +158,11 @@ def main():
         survey_insert = df_survey[["respondent_key", "key_type", "customer_id", "order_id", "diet_pref", "taste_pref"]].copy()
         survey_insert.to_sql("survey", engine, schema="core", if_exists="append", index=False)
 
-        # 8) 刷新每位客户每月订单汇总
+        # 8) Refresh monthly customer order summary
         with engine.begin() as conn:
             refresh_customer_monthly_order_summary(conn, batch_id)
 
-        # 9) 回写 run log
+        # 9) Write back run log
         with engine.begin() as conn:
             stats = {
                 "ror": conn.execute(text("SELECT COUNT(*) FROM raw.orders WHERE batch_id = :b"), {"b": batch_id}).scalar(),

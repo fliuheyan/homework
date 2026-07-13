@@ -329,6 +329,7 @@ def build_quality_results(df_orders, df_customer, df_survey):
     issues += survey_issues
 
     issue_df = pd.DataFrame(issues, columns=["table", "column", "description", "invalid_count"])
+
     total_records_map = {
         "raw.orders": len(df_orders),
         "raw.customer": len(df_customer),

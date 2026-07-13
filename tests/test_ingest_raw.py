@@ -14,6 +14,8 @@ import pytest
 
 from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
 
+CUSTOMER_CITY_ZIP_MODULE = "etl.transformers.customer.05_normalize_city_zip"
+
 
 # ---------------------------------------------------------------------------
 # Minimal stub for an openpyxl cell (avoids needing a real workbook)
@@ -166,17 +168,20 @@ class TestSheetToTextDf:
         result = df.iloc[0]["order_date_text"]
         assert result == dt
 
-    def test_chinese_date_and_currency_text_preserved(self, xlsx_path):
+    def test_preformatted_text_cells_preserved(self, xlsx_path):
         path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
         assert df.iloc[0]["order_date_text"] == "2021年8月5日"
+        assert df.iloc[0]["email_text"] == "Muster8@Mailing.com"
         assert df.iloc[0]["net_amount_text"] == "$51.95"
+        assert df.iloc[0]["order_number_text"] == "ORD153"
 
 
 class TestCustomerCityZipNormalize:
+    module = importlib.import_module(CUSTOMER_CITY_ZIP_MODULE)
+
     def test_extract_zip_from_city_when_zip_empty(self):
-        mod = importlib.import_module("etl.transformers.customer.05_normalize_city_zip")
-        df = mod.transform(
+        df = self.module.transform(
             pd.DataFrame(
                 [
                     {

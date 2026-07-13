@@ -72,7 +72,7 @@ Excel / CSV 原始文件
 - Batch: <批次 ID>
 
 ## Summary by Table
-| table | checks | total_issues |
+| table | total_records | total_issues |
 
 ## raw.customer_raw
 | column | description | invalid_count |
@@ -97,16 +97,17 @@ Excel / CSV 原始文件
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
-| `birthday_text` | 日期格式合法性 | 可宽松解析，但必须能转换为有效日期，拒绝无法解析的字符串 |
-| `gender_text` | 性别合法值 | 仅接受 `male` / `female` / `m` / `f`（大小写不敏感） |
-| `country_text` | 国家合法值 | 仅接受 `DE` / `Deutschland` / `Germany`（大小写不敏感） |
-| `city_text` | 非空检测 | 不得为 NULL / 空字符串 |
+| `birthday_text` | 日期格式合法性 | 必须为 `YYYY-MM-DD` |
+| `gender_text` | 性别合法值 | 仅接受 `male` / `female`（大小写不敏感） |
+| `country_text` | 国家合法值 | 仅接受 `DE`（大小写不敏感） |
+| `zip_code_text` | 邮编合法性 | 不得为 NULL / 空字符串，且必须为 4–5 位数字 |
+| `city_text` | 城市字段合法性 | 不得为 NULL / 空字符串，且不得混入邮编 |
 
 #### `raw.survey_raw`
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
-| `respondent_key_text` | 键类型合法性 | 必须为合法 email 地址 **或** `ORD\d+` 格式的订单号 |
+| `respondent_key_text` | 键类型合法性 | 必须为合法 email 地址 **或** `ORD\d+` 格式的订单号，且同一批次不能混用两种类型 |
 | `diet_pref_text` | 非空检测 | 不得为 NULL / 空字符串 |
 
 ### 2.3 通用空值定义

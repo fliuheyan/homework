@@ -113,6 +113,11 @@ CREATE TABLE IF NOT EXISTS audit.etl_run_log (
   error_message TEXT
 );
 
+ALTER TABLE audit.etl_run_log
+  ADD COLUMN IF NOT EXISTS extract_duration_seconds DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS transform_duration_seconds DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS load_duration_seconds DOUBLE PRECISION;
+
 CREATE TABLE IF NOT EXISTS audit.data_quality_issue_summary (
   batch_id TEXT NOT NULL,
   table_name TEXT NOT NULL,
@@ -160,6 +165,9 @@ SELECT
   rows_orders_core,
   rows_customer_core,
   rows_survey_core,
+  extract_duration_seconds,
+  transform_duration_seconds,
+  load_duration_seconds,
   error_message
 FROM audit.etl_run_log
 WHERE started_at IS NOT NULL;
@@ -178,6 +186,31 @@ latest_success AS (
   ORDER BY ended_at DESC NULLS LAST, run_id DESC
   LIMIT 1
 ),
+raw_batches AS (
+  SELECT
+    batch_id,
+    MAX(ingested_at) AS latest_ingested_at
+  FROM (
+    SELECT batch_id, ingested_at FROM raw.orders
+    UNION ALL
+    SELECT batch_id, ingested_at FROM raw.customer
+    UNION ALL
+    SELECT batch_id, ingested_at FROM raw.survey
+  ) raw_batch_events
+  WHERE batch_id IS NOT NULL
+  GROUP BY batch_id
+),
+backlog AS (
+  SELECT COUNT(*)::INT AS backlog_size
+  FROM raw_batches rb
+  LEFT JOIN (
+    SELECT DISTINCT batch_id
+    FROM audit.etl_run_log
+    WHERE status = 'success'
+  ) completed
+    ON completed.batch_id = rb.batch_id
+  WHERE completed.batch_id IS NULL
+),
 aggregates AS (
   SELECT
     COUNT(*)::INT AS total_runs,
@@ -194,6 +227,13 @@ aggregates AS (
     ) AS avg_runtime_seconds,
     ROUND(
       (
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)))
+        FILTER (WHERE ended_at IS NOT NULL)
+      )::NUMERIC,
+      2
+    ) AS p50_runtime_seconds,
+    ROUND(
+      (
         PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)))
         FILTER (WHERE ended_at IS NOT NULL)
       )::NUMERIC,
@@ -208,7 +248,9 @@ SELECT
   a.running_runs,
   a.success_rate_pct,
   a.avg_runtime_seconds,
+  a.p50_runtime_seconds,
   a.p95_runtime_seconds,
+  b.backlog_size,
   ls.ended_at AS last_successful_load_at,
   ls.batch_id AS last_successful_batch_id,
   lr.batch_id AS latest_batch_id,
@@ -216,8 +258,37 @@ SELECT
   lr.started_at AS latest_started_at,
   lr.ended_at AS latest_ended_at
 FROM aggregates a
+LEFT JOIN backlog b ON TRUE
 LEFT JOIN latest_success ls ON TRUE
 LEFT JOIN latest_run lr ON TRUE;
+
+CREATE OR REPLACE VIEW audit.v_etl_step_duration_metrics AS
+SELECT
+  batch_id,
+  started_at,
+  ended_at,
+  'extract'::TEXT AS step,
+  extract_duration_seconds AS duration_seconds
+FROM audit.v_etl_run_metrics
+WHERE extract_duration_seconds IS NOT NULL
+UNION ALL
+SELECT
+  batch_id,
+  started_at,
+  ended_at,
+  'transform'::TEXT AS step,
+  transform_duration_seconds AS duration_seconds
+FROM audit.v_etl_run_metrics
+WHERE transform_duration_seconds IS NOT NULL
+UNION ALL
+SELECT
+  batch_id,
+  started_at,
+  ended_at,
+  'load'::TEXT AS step,
+  load_duration_seconds AS duration_seconds
+FROM audit.v_etl_run_metrics
+WHERE load_duration_seconds IS NOT NULL;
 
 CREATE OR REPLACE VIEW audit.v_data_quality_batch_metrics AS
 SELECT
@@ -263,6 +334,21 @@ SELECT
 FROM audit.data_quality_table_summary s
 JOIN latest_batch lb
   ON lb.batch_id = s.batch_id;
+
+CREATE OR REPLACE VIEW audit.v_data_quality_overview AS
+SELECT
+  batch_id,
+  MAX(created_at) AS created_at,
+  SUM(total_records)::INT AS total_records,
+  SUM(total_issues)::INT AS total_issues,
+  ROUND(
+    (
+      100.0 * SUM(total_issues) / NULLIF(SUM(total_records), 0)
+    )::NUMERIC,
+    2
+  ) AS error_rate_pct
+FROM audit.data_quality_table_summary
+GROUP BY batch_id;
 
 CREATE OR REPLACE VIEW audit.v_table_volume AS
 SELECT 'raw.orders'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM raw.orders
@@ -313,6 +399,20 @@ SELECT
   MAX(created_at) AS latest_timestamp,
   ROUND(EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))::NUMERIC, 2) AS freshness_lag_seconds
 FROM core.survey;
+
+CREATE OR REPLACE VIEW audit.v_db_system_health AS
+SELECT
+  current_database()::TEXT AS database_name,
+  d.numbackends::INT AS connections,
+  d.deadlocks::BIGINT AS deadlocks,
+  d.blks_read::BIGINT AS blocks_read,
+  d.blks_hit::BIGINT AS blocks_hit,
+  d.temp_bytes::BIGINT AS temp_bytes,
+  pg_database_size(current_database())::BIGINT AS storage_bytes,
+  pg_size_pretty(pg_database_size(current_database()))::TEXT AS storage_pretty,
+  d.stats_reset
+FROM pg_stat_database d
+WHERE d.datname = current_database();
 
 -- =========================
 -- INDEXES

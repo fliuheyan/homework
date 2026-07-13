@@ -106,7 +106,8 @@ def main():
                 ORDER BY customer_id DESC
             """), conn)
 
-        customer_map2 = customer_map2.drop_duplicates(subset=["email_norm"], keep="first")
+        unique_email_mask = ~customer_map2["email_norm"].duplicated(keep=False)
+        customer_map2 = customer_map2[unique_email_mask]
 
         survey_required_cols = ["respondent_key", "key_type", "diet_pref", "taste_pref"]
         missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]

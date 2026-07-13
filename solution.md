@@ -107,7 +107,7 @@ Excel / CSV 原始文件
 
 | 字段 | 检测项 | 检测规则 |
 |---|---|---|
-| `respondent_key_text` | 键类型合法性 | 必须为合法 email 地址 **或** `ORD\d+` 格式的订单号，且同一批次不能混用两种类型 |
+| `respondent_key_text` | 键类型与可关联性 | `ORD\d+` 格式的订单号视为合法；若为 email，则必须是合法地址，且标准化后在 `customer` 中只能命中唯一一条记录 |
 | `diet_pref_text` | 非空检测 | 不得为 NULL / 空字符串 |
 
 ### 2.3 通用空值定义
@@ -187,7 +187,7 @@ Excel / CSV 原始文件
 
 | 字段 | 问题描述 | 示例 |
 |---|---|---|
-| `respondent_key_text` | 第一列混合存放了 email 地址和订单号两种类型 | `user@example.com`、`ORD12345` |
+| `respondent_key_text` | 第一列混合存放了 email 地址和订单号两种类型；其中 email 若在客户表中不唯一会导致关联歧义 | `user@example.com`、`ORD12345` |
 | `diet_pref_text` | 可能存在空值 | NULL / `""` |
 | `taste_pref_text` | 可能存在空值或不规范值 | NULL / `""` |
 
@@ -201,9 +201,9 @@ Excel / CSV 原始文件
 
 #### 关联逻辑（core.survey）
 
-- `key_type = 'email'` → 通过 `email_norm` 匹配 `core.customer`，填入 `customer_id`
+- `key_type = 'email'` → 通过 `email_norm` 匹配 `core.customer`；仅当标准化后的 email 在客户表中唯一时才填入 `customer_id`
 - `key_type = 'order_number'` → 通过 `order_number` 匹配 `core.orders`，填入 `order_id`
-- `key_type = 'invalid'` → 两个外键均为 NULL，数据保留但标记为无法关联
+- `key_type = 'invalid'`，或 email 命中多个客户 → 两个外键均为 NULL，数据保留但标记为无法关联
 
 ---
 

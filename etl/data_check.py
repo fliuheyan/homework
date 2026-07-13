@@ -1,7 +1,7 @@
 import os
 import re
 import datetime as pydt
-from datetime import datetime, UTC
+from datetime import datetime
 
 import pandas as pd
 from sqlalchemy import text
@@ -248,7 +248,7 @@ def check_survey(df, df_customer=None):
 
 def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(pydt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines = [
         "# Data Quality Report",
@@ -283,7 +283,7 @@ def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
 
 
 def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map):
-    created_at = datetime.now(UTC)
+    created_at = datetime.now(pydt.timezone.utc)
     table_records = [
         {
             "batch_id": batch_label,

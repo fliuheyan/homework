@@ -2,6 +2,7 @@ import os
 import glob
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -30,16 +31,42 @@ RAW_COLUMNS = {
 
 
 def _cell_to_display_text(cell):
-    """Return the raw cell value with no transformation.
-
-    Rules:
-    - Empty cell (value is None) → None
-    - All other values → return as-is (string/date/datetime/number/etc.)
-    """
+    """Return Excel-like display text for raw ingestion."""
     v = cell.value
     if v is None:
         return None
-    return v
+    if isinstance(v, str):
+        return v
+
+    fmt = (cell.number_format or "").lower()
+
+    if isinstance(v, datetime):
+        if ("年" in fmt) and ("月" in fmt) and ("日" in fmt):
+            return f"{v.year}年{v.month}月{v.day}日"
+        if any(t in fmt for t in ["yyyy", "yy", "mm", "dd"]):
+            return f"{v.year:04d}-{v.month:02d}-{v.day:02d}"
+        return str(v)
+
+    if isinstance(v, (int, float, Decimal)):
+        symbols = ["€", "$", "£", "¥", "₩"]
+        symbol = next((s for s in symbols if s in (cell.number_format or "")), None)
+        if symbol:
+            raw_fmt = cell.number_format or ""
+            section = raw_fmt.split(";")[0]
+            decimals = 0
+            if "." in section:
+                decimals = sum(1 for ch in section.split(".", 1)[1] if ch in ("0", "#"))
+            number = f"{float(v):.{decimals}f}"
+            first_placeholder = min((section.find(ch) for ch in ("#", "0") if section.find(ch) != -1), default=0)
+            symbol_pos = section.find(symbol)
+            if symbol_pos != -1 and symbol_pos < first_placeholder:
+                space = " " if symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " " else ""
+                return f"{symbol}{space}{number}"
+            space = " " if symbol_pos > 0 and section[symbol_pos - 1] == " " else ""
+            return f"{number}{space}{symbol}"
+        return str(v)
+
+    return str(v)
 
 
 def _sheet_to_text_df(file_path: str, sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:

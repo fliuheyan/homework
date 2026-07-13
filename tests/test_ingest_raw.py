@@ -5,7 +5,7 @@ conversion, no extra processing beyond Excel's raw read value).
 """
 import os
 import tempfile
-from datetime import datetime, date
+from datetime import datetime
 
 import openpyxl
 import pytest
@@ -55,23 +55,30 @@ class TestCellToDisplayText:
         assert _cell_to_display_text(_FakeCell("007")) == "007"
 
     def test_integer_value_no_formatting(self):
-        # An integer in Excel should remain integer (no extra formatting)
         result = _cell_to_display_text(_FakeCell(42, number_format="#,##0.00"))
-        assert result == 42
+        assert result == "42"
 
     def test_float_value_no_formatting(self):
         result = _cell_to_display_text(_FakeCell(1234.5, number_format="#,##0.00"))
-        assert result == 1234.5
+        assert result == "1234.5"
 
     def test_datetime_value_no_formatting(self):
         dt = datetime(2023, 1, 15, 10, 30, 0)
         result = _cell_to_display_text(_FakeCell(dt, number_format="dd/mm/yyyy"))
-        assert result == dt
+        assert result == "2023-01-15"
 
-    def test_date_value_no_formatting(self):
-        d = date(2023, 1, 15)
-        result = _cell_to_display_text(_FakeCell(d))
-        assert result == d
+    def test_currency_prefix_symbol_preserved(self):
+        result = _cell_to_display_text(_FakeCell(20.46, number_format="$#,##0.00"))
+        assert result == "$20.46"
+
+    def test_currency_suffix_symbol_preserved(self):
+        result = _cell_to_display_text(_FakeCell(43.58, number_format="#,##0.00 €"))
+        assert result == "43.58 €"
+
+    def test_chinese_date_display_preserved(self):
+        dt = datetime(2021, 8, 8, 0, 0, 0)
+        result = _cell_to_display_text(_FakeCell(dt, number_format="yyyy年m月d日"))
+        assert result == "2021年8月8日"
 
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
@@ -92,6 +99,21 @@ def _make_xlsx(rows: list[list]) -> str:
     ws.append(["order_date_text", "email_text", "net_amount_text", "order_number_text"])
     for row in rows:
         ws.append(row)
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    tmp.close()
+    wb.save(tmp.name)
+    return tmp.name
+
+
+def _make_xlsx_with_formats(rows: list[list], number_formats: dict[tuple[int, int], str]) -> str:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "orders"
+    ws.append(["order_date_text", "email_text", "net_amount_text", "order_number_text"])
+    for row in rows:
+        ws.append(row)
+    for (r, c), fmt in number_formats.items():
+        ws.cell(row=r, column=c).number_format = fmt
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp.close()
     wb.save(tmp.name)
@@ -146,20 +168,33 @@ class TestSheetToTextDf:
         assert df.iloc[0]["net_amount_text"] == "007"
 
     def test_integer_cell_not_formatted(self, xlsx_path):
-        """An integer cell must keep Excel raw read value (int)."""
         path = xlsx_path([["2023-01-15", "user@example.com", 1234567, "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
-        assert df.iloc[0]["net_amount_text"] == 1234567
+        assert df.iloc[0]["net_amount_text"] == "1234567"
 
     def test_float_cell_not_formatted(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", 99.9, "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
-        assert df.iloc[0]["net_amount_text"] == 99.9
+        assert df.iloc[0]["net_amount_text"] == "99.9"
 
     def test_datetime_cell_raw_str(self, xlsx_path):
-        """A datetime cell must keep Excel raw read value (datetime)."""
         dt = datetime(2023, 1, 15, 0, 0, 0)
         path = xlsx_path([[dt, "user@example.com", "100", "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
         result = df.iloc[0]["order_date_text"]
-        assert result == dt
+        assert result == "2023-01-15"
+
+    def test_datetime_and_currency_display_preserved(self):
+        path = _make_xlsx_with_formats(
+            [[datetime(2021, 8, 8, 0, 0, 0), "user@example.com", 43.58, "ORD-001"]],
+            {(2, 1): "yyyy年m月d日", (2, 3): "#,##0.00 €"},
+        )
+        try:
+            df = _sheet_to_text_df(path, "orders", self.COLS)
+            assert df.iloc[0]["order_date_text"] == "2021年8月8日"
+            assert df.iloc[0]["net_amount_text"] == "43.58 €"
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass

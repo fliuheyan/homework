@@ -443,7 +443,7 @@ CREATE INDEX IF NOT EXISTS idx_etl_run_log_batch_id ON audit.etl_run_log(batch_i
 CREATE INDEX IF NOT EXISTS idx_etl_run_log_batch_id_status ON audit.etl_run_log(batch_id, status);
 CREATE INDEX IF NOT EXISTS idx_etl_run_log_started_at ON audit.etl_run_log(started_at);
 CREATE INDEX IF NOT EXISTS idx_dq_issue_summary_created_at ON audit.data_quality_issue_summary(created_at);
-CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_batch
+CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_batch_desc
   ON audit.data_quality_table_summary(created_at DESC, batch_id DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_monthly_order_summary_month
   ON audit.customer_monthly_order_summary(order_month, customer_id);

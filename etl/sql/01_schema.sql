@@ -350,6 +350,23 @@ SELECT
 FROM audit.data_quality_table_summary
 GROUP BY batch_id;
 
+CREATE OR REPLACE VIEW audit.v_latest_data_quality_overview AS
+WITH latest_batch AS (
+  SELECT batch_id
+  FROM audit.data_quality_table_summary
+  ORDER BY created_at DESC, batch_id DESC
+  LIMIT 1
+)
+SELECT
+  o.batch_id,
+  o.created_at,
+  o.total_records,
+  o.total_issues,
+  o.error_rate_pct
+FROM audit.v_data_quality_overview o
+JOIN latest_batch lb
+  ON lb.batch_id = o.batch_id;
+
 CREATE OR REPLACE VIEW audit.v_table_volume AS
 SELECT 'raw.orders'::TEXT AS table_name, COUNT(*)::BIGINT AS row_count FROM raw.orders
 UNION ALL
@@ -423,8 +440,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_order_date ON core.orders(order_date);
 CREATE INDEX IF NOT EXISTS idx_survey_customer_id ON core.survey(customer_id);
 CREATE INDEX IF NOT EXISTS idx_survey_order_id ON core.survey(order_id);
 CREATE INDEX IF NOT EXISTS idx_etl_run_log_batch_id ON audit.etl_run_log(batch_id);
+CREATE INDEX IF NOT EXISTS idx_etl_run_log_status_batch_id ON audit.etl_run_log(status, batch_id);
 CREATE INDEX IF NOT EXISTS idx_etl_run_log_started_at ON audit.etl_run_log(started_at);
 CREATE INDEX IF NOT EXISTS idx_dq_issue_summary_created_at ON audit.data_quality_issue_summary(created_at);
 CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_at ON audit.data_quality_table_summary(created_at);
+CREATE INDEX IF NOT EXISTS idx_dq_table_summary_created_batch
+  ON audit.data_quality_table_summary(created_at DESC, batch_id DESC);
 CREATE INDEX IF NOT EXISTS idx_customer_monthly_order_summary_month
   ON audit.customer_monthly_order_summary(order_month, customer_id);

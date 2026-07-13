@@ -485,7 +485,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT error_rate_pct FROM audit.v_data_quality_overview ORDER BY created_at DESC, batch_id DESC LIMIT 1;",
+          "rawSql": "SELECT error_rate_pct FROM audit.v_latest_data_quality_overview;",
           "refId": "A"
         }
       ],
@@ -534,7 +534,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT total_issues FROM audit.v_data_quality_overview ORDER BY created_at DESC, batch_id DESC LIMIT 1;",
+          "rawSql": "SELECT total_issues FROM audit.v_latest_data_quality_overview;",
           "refId": "A"
         }
       ],

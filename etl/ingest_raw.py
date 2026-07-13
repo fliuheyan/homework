@@ -1,5 +1,6 @@
 import os
 import glob
+import re
 import uuid
 from datetime import datetime, date
 
@@ -27,6 +28,55 @@ RAW_COLUMNS = {
     ],
     "survey": ["respondent_key_text", "diet_pref_text", "taste_pref_text"],
 }
+
+
+def _format_numeric_cell(value, number_format: str) -> str:
+    """将数值按 Excel number_format 格式化为文本，保留货币符号等字面内容。"""
+    if not number_format or number_format in ("General", "@"):
+        return str(value)
+
+    # 取正数部分（Excel 格式以 ; 分隔：正数;负数;零;文本）
+    parts = re.split(r";(?![^[]*\])", number_format)
+    pos_fmt = parts[0] if parts else number_format
+
+    # 提取引号内的字面文本，如 "€" 或 "USD"
+    quoted_literals = re.findall(r'"([^"]*)"', pos_fmt)
+    # 提取 [$X-locale] 格式的货币符号，如 [$€-407]
+    locale_currency = re.findall(r"\[\$([^\-\]]*)", pos_fmt)
+
+    currency_tokens = locale_currency + quoted_literals
+    currency_text = " ".join(t for t in currency_tokens if t.strip())
+
+    # 去掉格式操作符，提取数字模式
+    stripped = re.sub(r'"[^"]*"', " ", pos_fmt)    # 去除引号字面量
+    stripped = re.sub(r"\[.*?\]", "", stripped)     # 去除 [...] 块
+    stripped = re.sub(r"[_*].", "", stripped)       # 去除 _X 和 *X（对齐/填充符）
+    stripped = re.sub(r"\\(.)", r"\1", stripped)    # 反转义 \x -> x
+
+    # 从数字模式中获取千位分隔符和小数位数
+    decimal_places = 0
+    use_thousands = False
+    m = re.search(r"[#0]+(,[#0]+)*(\.([#0]+))?", stripped)
+    if m:
+        use_thousands = "," in m.group(0)
+        if m.group(3):
+            decimal_places = len(m.group(3))
+
+    if use_thousands:
+        formatted_num = f"{value:,.{decimal_places}f}"
+    else:
+        formatted_num = f"{value:.{decimal_places}f}"
+
+    if not currency_text:
+        return formatted_num
+
+    # 判断货币符号在数字前还是后
+    num_start = re.search(r"[#0]", pos_fmt)
+    cur_match = re.search(r'"[^"]*"|\[\$[^\]]*\]', pos_fmt)
+    if cur_match and num_start and cur_match.start() < num_start.start():
+        return f"{currency_text}{formatted_num}"
+    else:
+        return f"{formatted_num} {currency_text}"
 
 
 def _excel_date_to_text(v, fmt: str) -> str:
@@ -71,6 +121,10 @@ def _cell_to_display_text(cell):
     # 日期/时间：按 number_format 输出
     if isinstance(v, (datetime, date)):
         return _excel_date_to_text(v, cell.number_format)
+
+    # 数值：按 number_format 输出（保留货币符号等格式信息）
+    if isinstance(v, (int, float)):
+        return _format_numeric_cell(v, cell.number_format)
 
     # 其他类型直接字符串化
     s = str(v)

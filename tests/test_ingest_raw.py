@@ -13,6 +13,7 @@ import pytest
 from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
 
 COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
+ACCOUNTING_EUR_FORMAT = '_-* #,##0.00\\ "€"_-;\\-* #,##0.00\\ "€"_-;_-* "-"??\\ "€"_-;_-@_-'
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +241,7 @@ class TestSheetToTextDf:
             [[datetime(2021, 8, 2, 0, 0, 0), "user@example.com", 96.17, "ORD-001"]],
             {
                 (2, 1): '[$-407]d/\\ mmm/;@',
-                (2, 3): '_-* #,##0.00\\ "€"_-;\\-* #,##0.00\\ "€"_-;_-* "-"??\\ "€"_-;_-@_-',
+                (2, 3): ACCOUNTING_EUR_FORMAT,
             },
         )
         df = _sheet_to_text_df(path, "orders", COLS)

@@ -83,7 +83,7 @@ class TestCellToDisplayText:
     def test_time_only_format_not_forced_to_date(self):
         dt = datetime(2021, 8, 8, 12, 34, 56)
         result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
-        assert result == "2021-08-08 12:34:56"
+        assert result == "12:34:56"
 
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""

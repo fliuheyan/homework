@@ -62,13 +62,15 @@ def _cell_to_display_text(cell):
         return v
 
     fmt = (cell.number_format or "").lower()
+    clean_fmt = _strip_excel_literals(fmt)
 
     if isinstance(v, datetime):
-        # Handle explicit Chinese-style date display observed in source files.
-        if ("年" in fmt) and ("月" in fmt) and ("日" in fmt):
+        if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
             return f"{v.year}年{v.month}月{v.day}日"
-        has_date_tokens = any(t in fmt for t in ["y", "d"])
-        has_time_tokens = any(t in fmt for t in ["h", "s"])
+        has_date_tokens = any(t in clean_fmt for t in ["y", "d"])
+        has_time_tokens = any(t in clean_fmt for t in ["h", "s"])
+        if has_time_tokens and not has_date_tokens:
+            return v.strftime("%H:%M:%S")
         if has_date_tokens and has_time_tokens:
             return v.strftime("%Y-%m-%d %H:%M:%S")
         if has_date_tokens:
@@ -76,10 +78,9 @@ def _cell_to_display_text(cell):
         return str(v)
 
     if isinstance(v, (int, float, Decimal)):
-        symbol = next((s for s in CURRENCY_SYMBOLS if s in (cell.number_format or "")), None)
+        symbol = next((s for s in CURRENCY_SYMBOLS if s in clean_fmt), None)
         if symbol:
-            raw_fmt = cell.number_format or ""
-            section = _strip_excel_literals(raw_fmt.split(";")[0])
+            section = _strip_excel_literals((cell.number_format or "").split(";")[0])
             decimals = 0
             if "." in section:
                 tail = section.split(".", 1)[1]

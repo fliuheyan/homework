@@ -58,7 +58,7 @@ The ETL persists monitoring data into PostgreSQL and exposes Grafana-friendly vi
 - `audit.etl_run_log`: ETL batch execution records
 - `audit.data_quality_issue_summary`: field-level quality issue counts by batch
 - `audit.data_quality_table_summary`: table-level quality totals by batch
-- `audit.customer_monthly_order_summary`: latest batch monthly order totals per customer
+- `audit.customer_monthly_order_summary`: latest core snapshot monthly order totals per customer
 - `audit.v_etl_run_metrics`: runtime/status metrics per ETL run
 - `audit.v_etl_health_kpis`: latest status, success rate, average runtime, P95 runtime
 - `audit.v_data_quality_batch_metrics`: total quality issues and issue rates by batch/table
@@ -90,7 +90,7 @@ It now also writes the same quality results into PostgreSQL for Grafana queries.
 
 ## Monthly customer order totals
 
-After each `core.*` rebuild in `python -m etl.main`, the ETL refreshes `audit.customer_monthly_order_summary`.
+After each `core.*` rebuild in `python -m etl.main`, the ETL truncates and rebuilds `audit.customer_monthly_order_summary` for the latest core snapshot.
 
 Example query:
 

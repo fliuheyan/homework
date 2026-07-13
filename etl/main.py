@@ -22,7 +22,7 @@ def refresh_customer_monthly_order_summary(conn, batch_id):
             c.email AS customer_email,
             DATE_TRUNC('month', o.order_date)::DATE AS order_month,
             COUNT(*)::INT AS order_count,
-            COALESCE(SUM(o.net_amount), 0)::NUMERIC(14,2) AS total_net_amount
+            SUM(o.net_amount)::NUMERIC(14,2) AS total_net_amount
         FROM core.orders o
         JOIN core.customer c
           ON c.customer_id = o.customer_id

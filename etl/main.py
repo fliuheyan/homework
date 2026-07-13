@@ -104,7 +104,7 @@ def main():
 
         # 6) Link orders to customer_id via email_norm (randomly select one customer_id for duplicate emails)
         with engine.begin() as conn:
-            customer_df = pd.read_sql(text("""
+            customer_data = pd.read_sql(text("""
                 SELECT customer_id, email_norm
                 FROM core.customer
                 WHERE email_norm IS NOT NULL
@@ -117,7 +117,7 @@ def main():
 
         df_orders = attach_customer_ids_to_orders(
             df_orders,
-            customer_df,
+            customer_data,
             random_state=get_order_customer_selection_seed(),
         )
         df_orders = df_orders.dropna(subset=["customer_id", "order_date", "net_amount", "order_number"])

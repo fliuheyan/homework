@@ -12,6 +12,8 @@ import pytest
 
 from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
 
+COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
+
 
 # ---------------------------------------------------------------------------
 # Minimal stub for an openpyxl cell (avoids needing a real workbook)
@@ -101,7 +103,7 @@ def _make_xlsx(rows: list[list]) -> str:
     ws = wb.active
     ws.title = "orders"
     # Header row
-    ws.append(["order_date_text", "email_text", "net_amount_text", "order_number_text"])
+    ws.append(COLS)
     for row in rows:
         ws.append(row)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -115,7 +117,7 @@ def _make_xlsx_with_formats(rows: list[list], number_formats: dict[tuple[int, in
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "orders"
-    ws.append(["order_date_text", "email_text", "net_amount_text", "order_number_text"])
+    ws.append(COLS)
     for row in rows:
         ws.append(row)
     for (r, c), fmt in number_formats.items():
@@ -165,17 +167,15 @@ def xlsx_path_with_formats():
 
 
 class TestSheetToTextDf:
-    COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
-
     def test_leading_trailing_spaces_preserved(self, xlsx_path):
         path = xlsx_path([["  2023-01-15  ", "  user@example.com  ", "  100.00  ", "  ORD-001  "]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "  2023-01-15  "
         assert df.iloc[0]["email_text"] == "  user@example.com  "
 
     def test_empty_string_preserved_not_null(self, xlsx_path):
         path = xlsx_path([["", "user@example.com", "100", "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         val = df.iloc[0]["order_date_text"]
         # Empty string cell: openpyxl reads as None (truly empty), so None is acceptable.
         # The important thing is that a non-None empty string is not converted.
@@ -184,28 +184,28 @@ class TestSheetToTextDf:
 
     def test_date_like_text_preserved(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", "100", "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "2023-01-15"
 
     def test_numeric_like_text_preserved(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", "007", "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["net_amount_text"] == "007"
 
     def test_integer_cell_not_formatted(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", 1234567, "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["net_amount_text"] == "1234567"
 
     def test_float_cell_not_formatted(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", 99.9, "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["net_amount_text"] == "99.9"
 
     def test_datetime_cell_raw_str(self, xlsx_path):
         dt = datetime(2023, 1, 15, 0, 0, 0)
         path = xlsx_path([[dt, "user@example.com", "100", "ORD-001"]])
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         result = df.iloc[0]["order_date_text"]
         assert result == "2023-01-15 00:00:00"
 
@@ -214,6 +214,6 @@ class TestSheetToTextDf:
             [[datetime(2021, 8, 8, 0, 0, 0), "user@example.com", 43.58, "ORD-001"]],
             {(2, 1): "yyyy年m月d日", (2, 3): "#,##0.00 €"},
         )
-        df = _sheet_to_text_df(path, "orders", self.COLS)
+        df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "2021年8月8日"
         assert df.iloc[0]["net_amount_text"] == "43.58 €"

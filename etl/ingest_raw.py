@@ -61,8 +61,10 @@ def _cell_to_display_text(cell):
     if isinstance(v, str):
         return v
 
-    fmt = (cell.number_format or "").lower()
+    raw_fmt = (cell.number_format or "")
+    fmt = raw_fmt.lower()
     clean_fmt = _strip_excel_literals(fmt)
+    clean_first_section = _strip_excel_literals(raw_fmt.split(";")[0])
 
     if isinstance(v, datetime):
         if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
@@ -86,7 +88,7 @@ def _cell_to_display_text(cell):
     if isinstance(v, (int, float, Decimal)):
         symbol = next((s for s in CURRENCY_SYMBOLS if s in clean_fmt), None)
         if symbol:
-            section = _strip_excel_literals((cell.number_format or "").split(";")[0])
+            section = clean_first_section
             decimals = 0
             if "." in section:
                 tail = section.split(".", 1)[1]

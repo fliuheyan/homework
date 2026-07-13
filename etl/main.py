@@ -6,32 +6,34 @@ from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 
 def refresh_customer_monthly_order_summary(conn, batch_id):
-    conn.execute(text("TRUNCATE audit.customer_monthly_order_summary"))
-    conn.execute(text("""
-        INSERT INTO audit.customer_monthly_order_summary (
-            batch_id,
-            customer_id,
-            customer_email,
-            order_month,
-            order_count,
-            total_net_amount
-        )
-        SELECT
-            :b AS batch_id,
-            o.customer_id,
-            c.email AS customer_email,
-            DATE_TRUNC('month', o.order_date)::DATE AS order_month,
-            COUNT(*)::INT AS order_count,
-            SUM(o.net_amount)::NUMERIC(14,2) AS total_net_amount
-        FROM core.orders o
-        JOIN core.customer c
-          ON c.customer_id = o.customer_id
-        GROUP BY
-            o.customer_id,
-            c.email,
-            DATE_TRUNC('month', o.order_date)::DATE
-        ORDER BY o.customer_id, order_month
-    """), {"b": batch_id})
+    try:
+        conn.execute(text("TRUNCATE audit.customer_monthly_order_summary"))
+        conn.execute(text("""
+            INSERT INTO audit.customer_monthly_order_summary (
+                batch_id,
+                customer_id,
+                customer_email,
+                order_month,
+                order_count,
+                total_net_amount
+            )
+            SELECT
+                :b AS batch_id,
+                o.customer_id,
+                c.email AS customer_email,
+                DATE_TRUNC('month', o.order_date)::DATE AS order_month,
+                COUNT(*)::INT AS order_count,
+                SUM(o.net_amount)::NUMERIC(14,2) AS total_net_amount
+            FROM core.orders o
+            JOIN core.customer c
+              ON c.customer_id = o.customer_id
+            GROUP BY
+                o.customer_id,
+                c.email,
+                DATE_TRUNC('month', o.order_date)::DATE
+        """), {"b": batch_id})
+    except Exception as exc:
+        raise RuntimeError("Failed to refresh audit.customer_monthly_order_summary") from exc
 
 
 def main():

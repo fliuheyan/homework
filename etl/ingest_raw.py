@@ -48,7 +48,7 @@ MONTH_NAMES_FULL = [
 ]
 WEEKDAY_NAMES_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 WEEKDAY_NAMES_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-EXCEL_LOCALE_LONG_DATE_TAG = "[$-f800]"
+EXCEL_LOCALE_LONG_DATE_TAG = "[$-F800]"
 
 
 def _strip_excel_literals(fmt: str) -> str:
@@ -191,7 +191,7 @@ def _render_datetime_with_excel_format(v: datetime, section: str) -> str:
 
 
 def _is_locale_dependent_long_date_format(section: str) -> bool:
-    return EXCEL_LOCALE_LONG_DATE_TAG in section.lower()
+    return EXCEL_LOCALE_LONG_DATE_TAG in section.upper()
 
 
 def _cell_to_display_text(cell):

@@ -155,7 +155,7 @@ def duplicate_customer_emails(df_customer):
     if emails.empty:
         return set()
     counts = emails.value_counts()
-    return set(counts[counts > 1].index.tolist())
+    return set(counts[counts > 1].index)
 
 
 def collect_issue(rows, row_sets, table_name, column_name, description, mask):

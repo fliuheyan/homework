@@ -187,7 +187,7 @@ Excel / CSV 原始文件
 
 | 字段 | 问题描述 | 示例 |
 |---|---|---|
-| `respondent_key_text` | 第一列混合存放了 email 地址和订单号两种类型；其中 email 若在客户表中不唯一会导致关联歧义 | `user@example.com`、`ORD12345` |
+| `respondent_key_text` | 若使用 email 作为答卷标识，标准化后在客户表中可能命中多条记录，导致关联歧义 | `user@example.com` |
 | `diet_pref_text` | 可能存在空值 | NULL / `""` |
 | `taste_pref_text` | 可能存在空值或不规范值 | NULL / `""` |
 

@@ -35,8 +35,8 @@ def _format_numeric_cell(value, number_format: str) -> str:
     if not number_format or number_format in ("General", "@"):
         return str(value)
 
-    # 取正数部分（Excel 格式以 ; 分隔：正数;负数;零;文本）
-    parts = re.split(r";(?![^[]*\])", number_format)
+    # 取正数部分（Excel 格式以 ; 分隔：正数;负数;零;文本），跳过括号内的分号
+    parts = re.split(r";(?![^[]*\])", number_format)  # split on ; not inside [...] brackets
     pos_fmt = parts[0] if parts else number_format
 
     # 提取引号内的字面文本，如 "€" 或 "USD"
@@ -54,6 +54,7 @@ def _format_numeric_cell(value, number_format: str) -> str:
     stripped = re.sub(r"\\(.)", r"\1", stripped)    # 反转义 \x -> x
 
     # 从数字模式中获取千位分隔符和小数位数
+    # Pattern matches Excel number formats like #,##0.00 (optional thousands + optional decimals)
     decimal_places = 0
     use_thousands = False
     m = re.search(r"[#0]+(,[#0]+)*(\.([#0]+))?", stripped)

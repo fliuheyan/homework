@@ -30,6 +30,26 @@ RAW_COLUMNS = {
 }
 
 
+def _strip_excel_literals(fmt: str) -> str:
+    out = []
+    in_quotes = False
+    in_brackets = False
+    for ch in fmt:
+        if ch == '"':
+            in_quotes = not in_quotes
+            continue
+        if ch == "[" and not in_quotes:
+            in_brackets = True
+            continue
+        if ch == "]" and in_brackets:
+            in_brackets = False
+            continue
+        if in_quotes or in_brackets:
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _cell_to_display_text(cell):
     """Return Excel-like display text for raw ingestion."""
     v = cell.value
@@ -43,7 +63,11 @@ def _cell_to_display_text(cell):
     if isinstance(v, datetime):
         if ("年" in fmt) and ("月" in fmt) and ("日" in fmt):
             return f"{v.year}年{v.month}月{v.day}日"
-        if any(t in fmt for t in ["yyyy", "yy", "mm", "dd"]):
+        has_date_tokens = any(t in fmt for t in ["y", "d"])
+        has_time_tokens = any(t in fmt for t in ["h", "s"])
+        if has_date_tokens and has_time_tokens:
+            return v.strftime("%Y-%m-%d %H:%M:%S")
+        if has_date_tokens:
             return f"{v.year:04d}-{v.month:02d}-{v.day:02d}"
         return str(v)
 
@@ -52,14 +76,20 @@ def _cell_to_display_text(cell):
         symbol = next((s for s in symbols if s in (cell.number_format or "")), None)
         if symbol:
             raw_fmt = cell.number_format or ""
-            section = raw_fmt.split(";")[0]
+            section = _strip_excel_literals(raw_fmt.split(";")[0])
             decimals = 0
             if "." in section:
-                decimals = sum(1 for ch in section.split(".", 1)[1] if ch in ("0", "#"))
+                tail = section.split(".", 1)[1]
+                for ch in tail:
+                    if ch in ("0", "#"):
+                        decimals += 1
+                    else:
+                        break
             number = f"{float(v):.{decimals}f}"
-            first_placeholder = min((section.find(ch) for ch in ("#", "0") if section.find(ch) != -1), default=0)
+            placeholder_positions = [section.find(ch) for ch in ("#", "0") if section.find(ch) != -1]
+            first_placeholder = min(placeholder_positions) if placeholder_positions else len(section) + 1
             symbol_pos = section.find(symbol)
-            if symbol_pos != -1 and symbol_pos < first_placeholder:
+            if symbol_pos < first_placeholder:
                 space = " " if symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " " else ""
                 return f"{symbol}{space}{number}"
             space = " " if symbol_pos > 0 and section[symbol_pos - 1] == " " else ""

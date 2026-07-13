@@ -80,6 +80,11 @@ class TestCellToDisplayText:
         result = _cell_to_display_text(_FakeCell(dt, number_format="yyyy年m月d日"))
         assert result == "2021年8月8日"
 
+    def test_time_only_format_not_forced_to_date(self):
+        dt = datetime(2021, 8, 8, 12, 34, 56)
+        result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
+        assert result == str(dt)
+
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
         for raw in [" a", "a ", " a ", "\ta", "a\t"]:
@@ -106,6 +111,7 @@ def _make_xlsx(rows: list[list]) -> str:
 
 
 def _make_xlsx_with_formats(rows: list[list], number_formats: dict[tuple[int, int], str]) -> str:
+    """Write rows to a temporary xlsx and apply custom number formats to specific cells."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "orders"
@@ -182,7 +188,7 @@ class TestSheetToTextDf:
         path = xlsx_path([[dt, "user@example.com", "100", "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
         result = df.iloc[0]["order_date_text"]
-        assert result == "2023-01-15"
+        assert result == "2023-01-15 00:00:00"
 
     def test_datetime_and_currency_display_preserved(self):
         path = _make_xlsx_with_formats(

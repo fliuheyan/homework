@@ -61,6 +61,7 @@ def date_ok(v):
 
 
 def iso_date_ok(v):
+    """Return True when v is a non-null ISO date string in YYYY-MM-DD format."""
     if is_null_like(v):
         return False
     return bool(ISO_DATE_RE.match(str(v).strip()))
@@ -105,12 +106,14 @@ def city_ok(v):
 
 
 def zip_code_ok(v):
+    """Return True when v is a non-null 4-5 digit zip code string."""
     if is_null_like(v):
         return False
     return bool(ZIP_CODE_RE.match(str(v).strip()))
 
 
 def reference_kind(v):
+    """Classify respondent keys as null, email, order_number, or invalid."""
     if is_null_like(v):
         return "null"
     x = str(v).strip()
@@ -126,6 +129,7 @@ def reference_ok(v):
 
 
 def collect_issue(rows, row_sets, table_name, column_name, description, mask):
+    """Append one issue summary row and accumulate affected DataFrame indexes."""
     invalid_count = int(mask.sum())
     rows.append((table_name, column_name, description, invalid_count))
     if invalid_count:

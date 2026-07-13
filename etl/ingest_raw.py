@@ -1,7 +1,9 @@
 import os
 import glob
 import uuid
+import re
 from datetime import datetime
+from decimal import Decimal
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -28,18 +30,111 @@ RAW_COLUMNS = {
     "survey": ["respondent_key_text", "diet_pref_text", "taste_pref_text"],
 }
 
+CURRENCY_SYMBOLS = ["€", "$", "£", "¥", "₩"]
+
+
+def _strip_excel_literals(fmt: str) -> str:
+    out = []
+    in_quotes = False
+    in_brackets = False
+    for ch in fmt:
+        if ch == '"':
+            in_quotes = not in_quotes
+            continue
+        if ch == "[" and not in_quotes:
+            in_brackets = True
+            continue
+        if ch == "]" and in_brackets:
+            in_brackets = False
+            continue
+        if in_quotes or in_brackets:
+            continue
+        out.append(ch)
+    return "".join(out)
+
 
 def _cell_to_display_text(cell):
-    """Return the raw cell value with no transformation.
-
-    Rules:
-    - Empty cell (value is None) → None
-    - All other values → return as-is (string/date/datetime/number/etc.)
-    """
+    """Return Excel-like display text for raw ingestion."""
     v = cell.value
     if v is None:
         return None
-    return v
+    if isinstance(v, str):
+        return v
+
+    raw_fmt = (cell.number_format or "")
+    fmt = raw_fmt.lower()
+    clean_fmt = _strip_excel_literals(fmt)
+    clean_first_section = _strip_excel_literals(raw_fmt.split(";")[0])
+
+    if isinstance(v, datetime):
+        if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
+            m = f"{v.month:02d}" if "mm" in clean_fmt else str(v.month)
+            d = f"{v.day:02d}" if "dd" in clean_fmt else str(v.day)
+            return f"{v.year}年{m}月{d}日"
+        has_date_tokens = (
+            any(t in clean_fmt for t in ["y", "d", "年", "月", "日"])
+            or bool(re.search(r"[ymd]+[/-][ymd]+", clean_fmt))
+        )
+        has_time_tokens = (
+            any(t in clean_fmt for t in ["h", "s", "时", "分", "秒"])
+            or bool(re.search(r"h+:[m]+", clean_fmt))
+        )
+        if has_time_tokens and not has_date_tokens:
+            return v.strftime("%H:%M:%S")
+        if has_date_tokens and has_time_tokens:
+            return v.strftime("%Y-%m-%d %H:%M:%S")
+        if has_date_tokens:
+            date_fmt = clean_first_section.lower()
+
+            def _repl(match):
+                token = match.group(0)
+                ch = token[0]
+                if ch == "y":
+                    return f"{v.year % 100:02d}" if len(token) == 2 else f"{v.year:04d}"
+                if ch == "m":
+                    return f"{v.month:02d}" if len(token) >= 2 else str(v.month)
+                if ch == "d":
+                    return f"{v.day:02d}" if len(token) >= 2 else str(v.day)
+                return token
+
+            return re.sub(r"y{2,4}|m{1,2}|d{1,2}", _repl, date_fmt)
+        return str(v)
+
+    if isinstance(v, (int, float, Decimal)):
+        symbol = next((s for s in CURRENCY_SYMBOLS if s in clean_fmt), None)
+        section = clean_first_section
+        decimals = 0
+        if "." in section:
+            tail = section.split(".", 1)[1]
+            for ch in tail:
+                if ch in ("0", "#"):
+                    decimals += 1
+                elif ch == ",":
+                    continue
+                else:
+                    break
+        hash_pos = section.find("#")
+        zero_pos = section.find("0")
+        positions = [p for p in (hash_pos, zero_pos) if p != -1]
+        if not positions:
+            return str(v)
+        first_placeholder = min(positions)
+        integer_part = section.split(".", 1)[0]
+        use_grouping = "," in integer_part
+        number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")
+        if symbol:
+            symbol_pos = section.find(symbol)
+            has_space_near_symbol = (
+                (symbol_pos + 1 < len(section) and section[symbol_pos + 1].isspace())
+                or (symbol_pos > 0 and section[symbol_pos - 1].isspace())
+            )
+            space = " " if has_space_near_symbol else ""
+            if symbol_pos < first_placeholder:
+                return f"{symbol}{space}{number}"
+            return f"{number}{space}{symbol}"
+        return number
+
+    return str(v)
 
 
 def _sheet_to_text_df(file_path: str, sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:

@@ -150,6 +150,14 @@ def _excel_date_to_text(v, fmt: str) -> str:
             last_was_hour = False
 
         # 月份或分钟（紧跟小时 token 时为分钟，分隔符不影响 last_was_hour）
+        elif fl[i:i+4] == 'mmmm':
+            result.append(dt.strftime('%B'))
+            i += 4
+            last_was_hour = False
+        elif fl[i:i+3] == 'mmm':
+            result.append(dt.strftime('%b'))
+            i += 3
+            last_was_hour = False
         elif fl[i:i+2] == 'mm':
             result.append(f'{dt.minute:02d}' if last_was_hour else f'{dt.month:02d}')
             i += 2
@@ -160,6 +168,14 @@ def _excel_date_to_text(v, fmt: str) -> str:
             last_was_hour = False
 
         # 日
+        elif fl[i:i+4] == 'dddd':
+            result.append(dt.strftime('%A'))
+            i += 4
+            last_was_hour = False
+        elif fl[i:i+3] == 'ddd':
+            result.append(dt.strftime('%a'))
+            i += 3
+            last_was_hour = False
         elif fl[i:i+2] == 'dd':
             result.append(f'{dt.day:02d}')
             i += 2

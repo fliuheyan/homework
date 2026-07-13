@@ -6,12 +6,15 @@ conversion, no extra processing beyond Excel's raw read value).
 import os
 import tempfile
 from datetime import datetime
+import importlib
 
 import openpyxl
+import pandas as pd
 import pytest
 
 from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
 
+CUSTOMER_CITY_ZIP_MODULE = "etl.transformers.customer.05_normalize_city_zip"
 COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
 ACCOUNTING_EUR_FORMAT = '_-* #,##0.00\\ "€"_-;\\-* #,##0.00\\ "€"_-;_-* "-"??\\ "€"_-;_-@_-'
 
@@ -247,3 +250,30 @@ class TestSheetToTextDf:
         df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "2/ Aug/"
         assert df.iloc[0]["net_amount_text"] == "96.17 €"
+        
+    def test_preformatted_text_cells_preserved(self, xlsx_path):
+        path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
+        df = _sheet_to_text_df(path, "orders", COLS)
+        assert df.iloc[0]["order_date_text"] == "2021年8月5日"
+        assert df.iloc[0]["email_text"] == "Muster8@Mailing.com"
+        assert df.iloc[0]["net_amount_text"] == "$51.95"
+        assert df.iloc[0]["order_number_text"] == "ORD153"
+
+
+class TestCustomerCityZipNormalize:
+    module = importlib.import_module(CUSTOMER_CITY_ZIP_MODULE)
+
+    def test_extract_zip_from_city_when_zip_empty(self):
+        df = self.module.transform(
+            pd.DataFrame(
+                [
+                    {
+                        "zip_code_text": "",
+                        "city_text": "Düsseldorf 40239",
+                        "loyalty_score_text": "10",
+                    }
+                ]
+            )
+        )
+        assert df.iloc[0]["zip_code"] == "40239"
+        assert df.iloc[0]["city"] == "Düsseldorf"

@@ -1,25 +1,69 @@
 import os
 import glob
 import uuid
-import pandas as pd
 from datetime import datetime
+
+import pandas as pd
+from openpyxl import load_workbook
+
 from etl.db import get_engine
 
 SHEET_TO_RAW_TABLE = {
-    "orders":   ("raw", "orders_raw"),
+    "orders": ("raw", "orders_raw"),
     "customer": ("raw", "customer_raw"),
-    "survey":   ("raw", "survey_raw"),
+    "survey": ("raw", "survey_raw"),
 }
 
+RAW_COLUMNS = {
+    "orders": ["order_date_text", "email_text", "net_amount_text", "order_number_text"],
+    "customer": [
+        "email_text",
+        "birthday_text",
+        "gender_text",
+        "country_text",
+        "zip_code_text",
+        "city_text",
+        "loyalty_score_text",
+    ],
+    "survey": ["respondent_key_text", "diet_pref_text", "taste_pref_text"],
+}
+
+
 def _to_raw_text(value):
-    """
-    raw 层要求：保持 Excel 原始值语义，不做类型清洗/标准化。
-    - NaN/None -> None（入库为 NULL）
-    - 其他 -> 字符串原样表示
-    """
-    if pd.isna(value):
+    """raw 层：仅做文本透传；空值保持 NULL。"""
+    if value is None:
         return None
-    return str(value)
+    s = str(value)
+    return s if s != "" else None
+
+
+def _sheet_to_text_df(file_path: str, sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:
+    """
+    使用 openpyxl 读取单元格显示文本（data_only=True）。
+    只读取前 len(expected_cols) 列，跳过首行表头。
+    """
+    wb = load_workbook(file_path, data_only=True, read_only=True)
+    try:
+        ws = wb[sheet_name]
+        rows = []
+        max_col = len(expected_cols)
+
+        for row_idx, row in enumerate(ws.iter_rows(min_col=1, max_col=max_col, values_only=True), start=1):
+            if row_idx == 1:
+                # 第1行为表头
+                continue
+
+            vals = [_to_raw_text(v) for v in row]
+
+            # 整行为空则跳过
+            if all(v is None for v in vals):
+                continue
+
+            rows.append(vals)
+
+        return pd.DataFrame(rows, columns=expected_cols)
+    finally:
+        wb.close()
 
 
 def add_audit_cols(df, source_file, sheet_name, batch_id):
@@ -30,6 +74,7 @@ def add_audit_cols(df, source_file, sheet_name, batch_id):
     df["batch_id"] = batch_id
     df["row_num_in_sheet"] = range(2, len(df) + 2)  # 假设第1行是表头
     return df
+
 
 def main():
     engine = get_engine()
@@ -44,7 +89,8 @@ def main():
 
     for file_path in files:
         source_file = os.path.basename(file_path)
-        # 关键修复：按文本读取，避免 pandas 自动把日期/数值改写
+
+        # 先拿到 sheet 列表
         xls = pd.ExcelFile(file_path)
         for sheet in xls.sheet_names:
             sheet_l = sheet.strip().lower()
@@ -52,26 +98,15 @@ def main():
                 continue
 
             schema, table = SHEET_TO_RAW_TABLE[sheet_l]
-            df = pd.read_excel(xls, sheet, dtype=str, keep_default_na=False)
+            expected_cols = RAW_COLUMNS[sheet_l]
 
-            if sheet_l == "orders":
-                df = df.iloc[:, :4]
-                df.columns = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
-            elif sheet_l == "customer":
-                df = df.iloc[:, :7]
-                df.columns = ["email_text", "birthday_text", "gender_text", "country_text", "zip_code_text", "city_text", "loyalty_score_text"]
-            elif sheet_l == "survey":
-                df = df.iloc[:, :3]
-                df.columns = ["respondent_key_text", "diet_pref_text", "taste_pref_text"]
-
-            # 关键修复：raw 文本字段强制字符串透传，禁止隐式格式化
-            text_cols = [c for c in df.columns if c.endswith("_text")]
-            for col in text_cols:
-                df[col] = df[col].map(_to_raw_text)
+            # 关键修复：按 openpyxl 的 data_only 值逐格转文本，避免 pandas 自动类型规范化
+            df = _sheet_to_text_df(file_path, sheet, expected_cols)
 
             df = add_audit_cols(df, source_file, sheet, batch_id)
             df.to_sql(table, engine, schema=schema, if_exists="append", index=False)
             print(f"Loaded {len(df)} rows -> {schema}.{table} from {source_file}:{sheet}")
+
 
 if __name__ == "__main__":
     main()

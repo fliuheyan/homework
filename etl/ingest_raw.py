@@ -1,7 +1,7 @@
 import os
 import glob
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -29,31 +29,70 @@ RAW_COLUMNS = {
 }
 
 
-def _to_raw_text(value):
-    """raw 层：仅做文本透传；空值保持 NULL。"""
-    if value is None:
+def _excel_date_to_text(v, fmt: str) -> str:
+    """将 Excel 日期/时间按 number_format 输出为文本（覆盖常见格式）。"""
+    if isinstance(v, datetime):
+        dt = v
+    elif isinstance(v, date):
+        dt = datetime(v.year, v.month, v.day)
+    else:
+        return str(v)
+
+    f = (fmt or "").lower()
+
+    # 常见纯日期格式
+    if "yyyy" in f and "mm" in f and "dd" in f and "h" not in f:
+        sep = "/"
+        if "-" in f:
+            sep = "-"
+        elif "." in f:
+            sep = "."
+
+        # 兼容 m/d 与 mm/dd
+        month = str(dt.month) if "m/" in f or "/m" in f else f"{dt.month:02d}"
+        day = str(dt.day) if "d/" in f or "/d" in f else f"{dt.day:02d}"
+        year = f"{dt.year:04d}"
+        return f"{year}{sep}{month}{sep}{day}"
+
+    # 带时间
+    if "h" in f:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # 默认日期
+    return dt.strftime("%Y-%m-%d")
+
+
+def _cell_to_display_text(cell):
+    """核心：把单元格转换为“显示文本语义”。"""
+    v = cell.value
+    if v is None:
         return None
-    s = str(value)
+
+    # 日期/时间：按 number_format 输出
+    if isinstance(v, (datetime, date)):
+        return _excel_date_to_text(v, cell.number_format)
+
+    # 其他类型直接字符串化
+    s = str(v)
     return s if s != "" else None
 
 
 def _sheet_to_text_df(file_path: str, sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:
     """
-    使用 openpyxl 读取单元格显示文本（data_only=True）。
+    使用 openpyxl 读取单元格值 + number_format，生成 raw 所需文本值。
     只读取前 len(expected_cols) 列，跳过首行表头。
     """
-    wb = load_workbook(file_path, data_only=True, read_only=True)
+    wb = load_workbook(file_path, data_only=False, read_only=True)
     try:
         ws = wb[sheet_name]
         rows = []
         max_col = len(expected_cols)
 
-        for row_idx, row in enumerate(ws.iter_rows(min_col=1, max_col=max_col, values_only=True), start=1):
+        for row_idx, row in enumerate(ws.iter_rows(min_col=1, max_col=max_col), start=1):
             if row_idx == 1:
-                # 第1行为表头
                 continue
 
-            vals = [_to_raw_text(v) for v in row]
+            vals = [_cell_to_display_text(c) for c in row]
 
             # 整行为空则跳过
             if all(v is None for v in vals):
@@ -100,7 +139,7 @@ def main():
             schema, table = SHEET_TO_RAW_TABLE[sheet_l]
             expected_cols = RAW_COLUMNS[sheet_l]
 
-            # 关键修复：按 openpyxl 的 data_only 值逐格转文本，避免 pandas 自动类型规范化
+            # 关键修复：按单元格值 + number_format 生成文本，避免自动类型规范化
             df = _sheet_to_text_df(file_path, sheet, expected_cols)
 
             df = add_audit_cols(df, source_file, sheet, batch_id)

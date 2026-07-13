@@ -258,7 +258,7 @@ class TestSheetToTextDf:
         )
         df = _sheet_to_text_df(path, "orders", COLS)
         assert df.iloc[0]["order_date_text"] == "2021-08-08"
-         
+
     def test_preformatted_text_cells_preserved(self, xlsx_path):
         path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
         df = _sheet_to_text_df(path, "orders", COLS)

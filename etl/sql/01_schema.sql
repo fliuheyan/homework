@@ -156,6 +156,13 @@ WITH latest_run AS (
   FROM audit.etl_run_log
   ORDER BY started_at DESC NULLS LAST, run_id DESC
   LIMIT 1
+),
+latest_success AS (
+  SELECT batch_id, ended_at
+  FROM audit.etl_run_log
+  WHERE status = 'success'
+  ORDER BY ended_at DESC NULLS LAST, run_id DESC
+  LIMIT 1
 )
 SELECT
   COUNT(*)::INT AS total_runs,
@@ -177,8 +184,8 @@ SELECT
     )::NUMERIC,
     2
   ) AS p95_runtime_seconds,
-  MAX(ended_at) FILTER (WHERE status = 'success') AS last_successful_load_at,
-  MAX(batch_id) FILTER (WHERE ended_at = (SELECT MAX(ended_at) FROM audit.etl_run_log WHERE status = 'success')) AS last_successful_batch_id,
+  (SELECT ended_at FROM latest_success) AS last_successful_load_at,
+  (SELECT batch_id FROM latest_success) AS last_successful_batch_id,
   (SELECT batch_id FROM latest_run) AS latest_batch_id,
   (SELECT status FROM latest_run) AS latest_status,
   (SELECT started_at FROM latest_run) AS latest_started_at,

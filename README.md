@@ -17,7 +17,7 @@ Grafana is provisioned as the frontend and reads metrics directly from the exist
 
 ## Run the stack
 
-From `/home/runner/work/homework/homework`:
+From the repository root:
 
 ```bash
 docker compose up --build
@@ -34,22 +34,22 @@ This starts:
 
 Grafana default credentials:
 
-- username: `admin`
-- password: `admin`
+- username: `${GRAFANA_ADMIN_USER:-admin}`
+- password: `${GRAFANA_ADMIN_PASSWORD:-admin}`
 
 ## Grafana setup
 
 Provisioning files live under:
 
-- `/home/runner/work/homework/homework/grafana/provisioning/datasources/postgres.yaml`
-- `/home/runner/work/homework/homework/grafana/provisioning/dashboards/dashboard.yaml`
-- `/home/runner/work/homework/homework/grafana/dashboards/etl-monitoring.json`
+- `./grafana/provisioning/datasources/postgres.yaml`
+- `./grafana/provisioning/dashboards/dashboard.yaml`
+- `./grafana/dashboards/etl-monitoring.json`
 
 Grafana uses the existing PostgreSQL container as its datasource:
 
-- host: `postgres:5432`
-- database: `bi_db`
-- user: `bi_user`
+- host: `${DB_HOST:-postgres}:${DB_PORT:-5432}`
+- database: `${DB_NAME:-bi_db}`
+- user: `${DB_USER:-bi_user}`
 
 ## Metrics exposed for Grafana
 
@@ -89,7 +89,7 @@ It now also writes the same quality results into PostgreSQL for Grafana queries.
 
 ## Tests
 
-From `/home/runner/work/homework/homework`:
+From the repository root:
 
 ```bash
 python -m pytest -q

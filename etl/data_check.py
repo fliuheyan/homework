@@ -309,6 +309,8 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
     ]
 
     with engine.begin() as conn:
+        # Replace any previously stored rows for the same batch so re-running the
+        # checker stays idempotent even when the issue set shrinks to zero.
         conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
         conn.execute(text("DELETE FROM audit.data_quality_table_summary WHERE batch_id = :b"), {"b": batch_label})
 

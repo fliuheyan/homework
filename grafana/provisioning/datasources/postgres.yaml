@@ -5,12 +5,12 @@ datasources:
     uid: homework-postgres
     type: postgres
     access: proxy
-    url: postgres:5432
-    user: bi_user
+    url: ${DB_HOST}:${DB_PORT}
+    user: ${DB_USER}
     secureJsonData:
-      password: bi_pass
+      password: ${DB_PASSWORD}
     jsonData:
-      database: bi_db
+      database: ${DB_NAME}
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false

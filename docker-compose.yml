@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: bi_pg
+    environment:
+      POSTGRES_USER: bi_user
+      POSTGRES_PASSWORD: bi_pass
+      POSTGRES_DB: bi_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./etl/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bi_user -d bi_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  etl:
+    build:
+      context: .
+      dockerfile: ./etl/Dockerfile
+    container_name: bi_etl
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+            python -m etl.ingest_raw &&
+            python -m etl.main"
+
+volumes:
+  pg_data:

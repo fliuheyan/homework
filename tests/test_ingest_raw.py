@@ -6,8 +6,10 @@ conversion, no extra processing beyond Excel's raw read value).
 import os
 import tempfile
 from datetime import datetime, date
+import importlib
 
 import openpyxl
+import pandas as pd
 import pytest
 
 from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
@@ -163,3 +165,27 @@ class TestSheetToTextDf:
         df = _sheet_to_text_df(path, "orders", self.COLS)
         result = df.iloc[0]["order_date_text"]
         assert result == dt
+
+    def test_chinese_date_and_currency_text_preserved(self, xlsx_path):
+        path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
+        df = _sheet_to_text_df(path, "orders", self.COLS)
+        assert df.iloc[0]["order_date_text"] == "2021年8月5日"
+        assert df.iloc[0]["net_amount_text"] == "$51.95"
+
+
+class TestCustomerCityZipNormalize:
+    def test_extract_zip_from_city_when_zip_empty(self):
+        mod = importlib.import_module("etl.transformers.customer.05_normalize_city_zip")
+        df = mod.transform(
+            pd.DataFrame(
+                [
+                    {
+                        "zip_code_text": "",
+                        "city_text": "Düsseldorf 40239",
+                        "loyalty_score_text": "10",
+                    }
+                ]
+            )
+        )
+        assert df.iloc[0]["zip_code"] == "40239"
+        assert df.iloc[0]["city"] == "Düsseldorf"

@@ -9,6 +9,9 @@ from openpyxl import load_workbook
 
 from etl.db import get_engine
 
+# 预编译：按未被 [...] 括住的 ; 拆分 Excel 格式段
+_EXCEL_FMT_SPLIT_RE = re.compile(r";(?![^[]*\])")
+
 SHEET_TO_RAW_TABLE = {
     "orders": ("raw", "orders_raw"),
     "customer": ("raw", "customer_raw"),
@@ -36,7 +39,7 @@ def _format_numeric_cell(value, number_format: str) -> str:
         return str(value)
 
     # 取正数部分（Excel 格式以 ; 分隔：正数;负数;零;文本），跳过括号内的分号
-    parts = re.split(r";(?![^[]*\])", number_format)  # split on ; not inside [...] brackets
+    parts = _EXCEL_FMT_SPLIT_RE.split(number_format)
     pos_fmt = parts[0] if parts else number_format
 
     # 提取引号内的字面文本，如 "€" 或 "USD"
@@ -81,7 +84,12 @@ def _format_numeric_cell(value, number_format: str) -> str:
 
 
 def _excel_date_to_text(v, fmt: str) -> str:
-    """将 Excel 日期/时间按 number_format 逐 token 解析，原样输出为文本。"""
+    """将 Excel 日期/时间按 number_format 逐 token 解析，原样输出为文本。
+
+    Excel 规则：m/mm 在紧跟小时 token（h/hh）之后（允许中间有分隔符）时表示分钟，
+    其他位置一律表示月份。last_was_hour 用于追踪这一状态；只有遇到实际格式
+    token（非分隔符）才会将其重置为 False，分隔符字符不改变该状态。
+    """
     if isinstance(v, datetime):
         dt = v
     elif isinstance(v, date):
@@ -93,20 +101,22 @@ def _excel_date_to_text(v, fmt: str) -> str:
         return dt.strftime("%Y-%m-%d")
 
     # 取正数/日期部分（Excel 以 ; 分隔多段，取第一段）
-    parts = re.split(r";(?![^[]*\])", fmt)
+    parts = _EXCEL_FMT_SPLIT_RE.split(fmt)
     pos_fmt = parts[0] if parts else fmt
 
     result = []
     i = 0
     fl = pos_fmt.lower()
-    last_was_hour = False  # 用于区分 m/mm 是月份还是分钟
+    last_was_hour = False
 
     while i < len(pos_fmt):
         # 引号内的字面文本，原样保留
         if pos_fmt[i] == '"':
             end = pos_fmt.find('"', i + 1)
             if end == -1:
-                end = len(pos_fmt)
+                # 未闭合引号：将剩余内容作为字面量处理
+                result.append(pos_fmt[i + 1:])
+                break
             result.append(pos_fmt[i + 1:end])
             i = end + 1
             last_was_hour = False
@@ -139,7 +149,7 @@ def _excel_date_to_text(v, fmt: str) -> str:
             i += 2
             last_was_hour = False
 
-        # 月份或分钟（紧跟小时 token 时为分钟）
+        # 月份或分钟（紧跟小时 token 时为分钟，分隔符不影响 last_was_hour）
         elif fl[i:i+2] == 'mm':
             result.append(f'{dt.minute:02d}' if last_was_hour else f'{dt.month:02d}')
             i += 2
@@ -159,7 +169,7 @@ def _excel_date_to_text(v, fmt: str) -> str:
             i += 1
             last_was_hour = False
 
-        # 小时
+        # 小时（设置 last_was_hour，供后续 m/mm 判断用）
         elif fl[i:i+2] == 'hh':
             result.append(f'{dt.hour:02d}')
             i += 2
@@ -189,8 +199,7 @@ def _excel_date_to_text(v, fmt: str) -> str:
             i += 3
             last_was_hour = False
 
-        # 其他字符（分隔符 - / . : 空格，以及中文字符等）原样保留
-        # 注意：分隔符不重置 last_was_hour，以便 hh:mm 中的 mm 正确识别为分钟
+        # 其他字符（- / . : 空格，中文字符等）原样保留，且不改变 last_was_hour
         else:
             result.append(pos_fmt[i])
             i += 1

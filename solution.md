@@ -140,7 +140,7 @@ audit 层       记录 ETL 运行日志、质量汇总，并提供 Grafana 查�
 | `gender_text` | 性别值 | 仅接受 `male` / `female` |
 | `country_text` | 国家值 | 仅接受 `DE` |
 | `zip_code_text` | 邮编格式 | 必须为 4–5 位数字，且不能为空 |
-| `city_text` | 城市格式 | 不得为空，且不得夹带邮编 |
+| `city_text` | 城市格式 | 不得为空，且不得夹杂邮编 |
 
 #### `raw.survey`
 
@@ -211,7 +211,7 @@ audit 层       记录 ETL 运行日志、质量汇总，并提供 Grafana 查�
 
 - customer 全量写入 `core.customer`
 - 允许重复 `email_norm`
-- `loyalty_score` 当前仅做数值转换，**未在实现中限制 1–3 值域**
+- `loyalty_score` 当前仅做数值转换，**未在实现中限制 1–3 值域**（见下文 8.2）
 
 ### 5.3 `raw.survey` → `core.survey`
 

@@ -8,14 +8,12 @@ from etl.db import get_engine
 
 
 def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map):
-    created_at = datetime.now(timezone.utc)
     table_records = [
         {
             "batch_id": batch_label,
             "table_name": table_name,
             "total_records": int(total_records_map.get(table_name, 0)),
             "total_issues": int(len(bad_rows_map.get(table_name, set()))),
-            "created_at": created_at,
         }
         for table_name in ["raw.customer", "raw.orders", "raw.survey"]
     ]
@@ -27,14 +25,18 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
             "column_name": row["column"],
             "description": row["description"],
             "invalid_count": int(row["invalid_count"]),
-            "created_at": created_at,
         }
         for _, row in issue_df.iterrows()
         if int(row["invalid_count"]) > 0
     ]
 
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
+        created_at = datetime.now(timezone.utc)
+        for record in table_records:
+            record["created_at"] = created_at
+        for record in issue_records:
+            record["created_at"] = created_at
+
         conn.execute(
             text("""
                 INSERT INTO audit.data_quality_table_summary
@@ -48,6 +50,8 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
             """),
             table_records,
         )
+
+        conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
 
         if issue_records:
             conn.execute(

@@ -282,69 +282,7 @@ def write_report(path, batch_label, total_records_map, issue_df, bad_rows_map):
         f.write("\n".join(lines))
 
 
-def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map):
-    created_at = datetime.now(pydt.timezone.utc)
-    table_records = [
-        {
-            "batch_id": batch_label,
-            "table_name": table_name,
-            "total_records": int(total_records_map.get(table_name, 0)),
-            "total_issues": int(len(bad_rows_map.get(table_name, set()))),
-            "created_at": created_at,
-        }
-        for table_name in ["raw.customer", "raw.orders", "raw.survey"]
-    ]
-
-    issue_records = [
-        {
-            "batch_id": batch_label,
-            "table_name": row["table"],
-            "column_name": row["column"],
-            "description": row["description"],
-            "invalid_count": int(row["invalid_count"]),
-            "created_at": created_at,
-        }
-        for _, row in issue_df.iterrows()
-        if int(row["invalid_count"]) > 0
-    ]
-
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
-
-        conn.execute(
-            text("""
-                INSERT INTO audit.data_quality_table_summary
-                    (batch_id, table_name, total_records, total_issues, created_at)
-                VALUES
-                    (:batch_id, :table_name, :total_records, :total_issues, :created_at)
-                ON CONFLICT (batch_id, table_name) DO UPDATE
-                SET total_records = EXCLUDED.total_records,
-                    total_issues = EXCLUDED.total_issues,
-                    created_at = EXCLUDED.created_at
-            """),
-            table_records,
-        )
-
-        if issue_records:
-            conn.execute(
-                text("""
-                    INSERT INTO audit.data_quality_issue_summary
-                        (batch_id, table_name, column_name, description, invalid_count, created_at)
-                    VALUES
-                        (:batch_id, :table_name, :column_name, :description, :invalid_count, :created_at)
-                    ON CONFLICT (batch_id, table_name, column_name, description) DO UPDATE
-                    SET invalid_count = EXCLUDED.invalid_count,
-                        created_at = EXCLUDED.created_at
-                """),
-                issue_records,
-            )
-
-
-def main():
-    engine = get_engine()
-    output_path = os.getenv("DQ_REPORT_PATH", REPORT_PATH_DEFAULT)
-    only_latest = os.getenv("DQ_ONLY_LATEST_BATCH", "true").lower() == "true"
-
+def load_batch_frames(engine, only_latest=True):
     with engine.begin() as conn:
         if only_latest:
             batch_id = conn.execute(text("""
@@ -355,8 +293,7 @@ def main():
             """)).scalar()
 
             if not batch_id:
-                print("[DQ] no data")
-                return
+                return None, None, None, None
 
             df_orders = pd.read_sql(text("SELECT * FROM raw.orders WHERE batch_id=:b"), conn, params={"b": batch_id})
             df_customer = pd.read_sql(text("SELECT * FROM raw.customer WHERE batch_id=:b"), conn, params={"b": batch_id})
@@ -368,6 +305,10 @@ def main():
             df_survey = pd.read_sql(text("SELECT * FROM raw.survey"), conn)
             batch_label = "ALL"
 
+    return batch_label, df_orders, df_customer, df_survey
+
+
+def build_quality_results(df_orders, df_customer, df_survey):
     issues = []
     bad_rows_map = {}
 
@@ -380,7 +321,6 @@ def main():
     issues += survey_issues
 
     issue_df = pd.DataFrame(issues, columns=["table", "column", "description", "invalid_count"])
-
     total_records_map = {
         "raw.orders": len(df_orders),
         "raw.customer": len(df_customer),
@@ -389,9 +329,21 @@ def main():
     bad_rows_map["raw.orders"] = order_bad_rows
     bad_rows_map["raw.customer"] = customer_bad_rows
     bad_rows_map["raw.survey"] = survey_bad_rows
+    return total_records_map, issue_df, bad_rows_map
 
+
+def main():
+    engine = get_engine()
+    output_path = os.getenv("DQ_REPORT_PATH", REPORT_PATH_DEFAULT)
+    only_latest = os.getenv("DQ_ONLY_LATEST_BATCH", "true").lower() == "true"
+
+    batch_label, df_orders, df_customer, df_survey = load_batch_frames(engine, only_latest=only_latest)
+    if not batch_label:
+        print("[DQ] no data")
+        return
+
+    total_records_map, issue_df, bad_rows_map = build_quality_results(df_orders, df_customer, df_survey)
     write_report(output_path, batch_label, total_records_map, issue_df, bad_rows_map)
-    persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map)
     print(f"[DQ] markdown report generated: {output_path}")
 
 

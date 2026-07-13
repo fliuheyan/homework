@@ -34,6 +34,7 @@ services:
       sh -c "pip install -r requirements.txt &&
             python -m etl.ingest_raw &&
             python -m etl.data_check &&
+            python -m etl.data_quality_metrics &&
             python -m etl.main"
 
   grafana:

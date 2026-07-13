@@ -29,7 +29,8 @@ This starts:
 - `etl`, which runs:
   1. `python -m etl.ingest_raw`
   2. `python -m etl.data_check`
-  3. `python -m etl.main`
+  3. `python -m etl.data_quality_metrics`
+  4. `python -m etl.main`
 - `grafana` on `http://localhost:3000`
 
 Grafana default credentials:
@@ -81,11 +82,11 @@ The provisioned dashboard `Homework ETL Monitoring` focuses on:
 
 ## Data quality report
 
-`python -m etl.data_check` still writes the Markdown report to:
+`python -m etl.data_check` writes the Markdown report to:
 
 - `/app/reports/data_quality_report.md`
 
-It now also writes the same quality results into PostgreSQL for Grafana queries.
+`python -m etl.data_quality_metrics` writes the same quality results into PostgreSQL for Grafana queries.
 
 ## Tests
 

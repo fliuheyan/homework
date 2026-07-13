@@ -43,6 +43,12 @@ FROM audit.customer_monthly_order_summary
 ORDER BY batch_id DESC, customer_id, order_month;
 ```
 
+## How to connect to the database
+
+```bash
+docker compose exec -e PGPASSWORD=bi_pass postgres psql -U bi_user -d bi_db
+```
+
 ## Tests
 
 From the repository root:

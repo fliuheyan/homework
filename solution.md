@@ -84,7 +84,7 @@ The job of `etl/ingest_raw.py` is to write Excel cell content into the raw layer
 
 1. It uses `openpyxl` to read cell values and `number_format`.
 2. It preserves Excel display formats whenever possible, for example:
-   - Chinese-style dates written with year/month/day characters, such as `2021-08-08` in a localized display format
+   - Localized year-first dates rendered with explicit year/month/day markers
    - Localized short dates: `2/ Aug/`
    - Currency suffixes: `43.58 €`
 3. It skips rows that are completely empty.
@@ -211,7 +211,7 @@ These values are usually not counted as format errors, but they are counted as i
 
 - All customer records are written to `core.customer`.
 - Duplicate `email_norm` values are allowed.
-- `loyalty_score` is currently only converted to numeric and is **not restricted to the 1-3 business range in the current implementation** (see Section 8.2 below).
+- `loyalty_score` is currently only converted to numeric and is **not restricted to the 1-3 business range in the current implementation** (see Section 8, item 2 below).
 
 ### 5.3 `raw.survey` → `core.survey`
 

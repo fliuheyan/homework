@@ -1,6 +1,5 @@
-import datetime as pydt
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 
@@ -9,7 +8,7 @@ from etl.db import get_engine
 
 
 def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map):
-    created_at = datetime.now(pydt.timezone.utc)
+    created_at = datetime.now(timezone.utc)
     table_records = [
         {
             "batch_id": batch_label,
@@ -69,14 +68,16 @@ def main():
     engine = get_engine()
     only_latest = os.getenv("DQ_ONLY_LATEST_BATCH", "true").lower() == "true"
 
-    batch_label, df_orders, df_customer, df_survey = load_batch_frames(engine, only_latest=only_latest)
-    if not batch_label:
+    batch_frames = load_batch_frames(engine, only_latest=only_latest)
+    if not batch_frames.batch_label:
         print("[DQ-METRICS] no data")
         return
 
-    total_records_map, issue_df, bad_rows_map = build_quality_results(df_orders, df_customer, df_survey)
-    persist_quality_metrics(engine, batch_label, total_records_map, issue_df, bad_rows_map)
-    print(f"[DQ-METRICS] persisted quality metrics for batch: {batch_label}")
+    total_records_map, issue_df, bad_rows_map = build_quality_results(
+        batch_frames.orders, batch_frames.customer, batch_frames.survey
+    )
+    persist_quality_metrics(engine, batch_frames.batch_label, total_records_map, issue_df, bad_rows_map)
+    print(f"[DQ-METRICS] persisted quality metrics for batch: {batch_frames.batch_label}")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import os
 import re
 import datetime as pydt
 from datetime import datetime
+from typing import NamedTuple
 
 import pandas as pd
 from sqlalchemy import text
@@ -22,6 +23,13 @@ REFERENCE_KIND_NULL = "null"
 REFERENCE_KIND_EMAIL = "email"
 REFERENCE_KIND_ORDER = "order_number"
 REFERENCE_KIND_INVALID = "invalid"
+
+
+class QualityBatchFrames(NamedTuple):
+    batch_label: str | None
+    orders: pd.DataFrame | None
+    customer: pd.DataFrame | None
+    survey: pd.DataFrame | None
 
 
 def is_datetime_like(v):
@@ -293,7 +301,7 @@ def load_batch_frames(engine, only_latest=True):
             """)).scalar()
 
             if not batch_id:
-                return None, None, None, None
+                return QualityBatchFrames(None, None, None, None)
 
             df_orders = pd.read_sql(text("SELECT * FROM raw.orders WHERE batch_id=:b"), conn, params={"b": batch_id})
             df_customer = pd.read_sql(text("SELECT * FROM raw.customer WHERE batch_id=:b"), conn, params={"b": batch_id})
@@ -305,7 +313,7 @@ def load_batch_frames(engine, only_latest=True):
             df_survey = pd.read_sql(text("SELECT * FROM raw.survey"), conn)
             batch_label = "ALL"
 
-    return batch_label, df_orders, df_customer, df_survey
+    return QualityBatchFrames(batch_label, df_orders, df_customer, df_survey)
 
 
 def build_quality_results(df_orders, df_customer, df_survey):
@@ -337,13 +345,15 @@ def main():
     output_path = os.getenv("DQ_REPORT_PATH", REPORT_PATH_DEFAULT)
     only_latest = os.getenv("DQ_ONLY_LATEST_BATCH", "true").lower() == "true"
 
-    batch_label, df_orders, df_customer, df_survey = load_batch_frames(engine, only_latest=only_latest)
-    if not batch_label:
+    batch_frames = load_batch_frames(engine, only_latest=only_latest)
+    if not batch_frames.batch_label:
         print("[DQ] no data")
         return
 
-    total_records_map, issue_df, bad_rows_map = build_quality_results(df_orders, df_customer, df_survey)
-    write_report(output_path, batch_label, total_records_map, issue_df, bad_rows_map)
+    total_records_map, issue_df, bad_rows_map = build_quality_results(
+        batch_frames.orders, batch_frames.customer, batch_frames.survey
+    )
+    write_report(output_path, batch_frames.batch_label, total_records_map, issue_df, bad_rows_map)
     print(f"[DQ] markdown report generated: {output_path}")
 
 

@@ -83,8 +83,7 @@ class TestCellToDisplayText:
     def test_time_only_format_not_forced_to_date(self):
         dt = datetime(2021, 8, 8, 12, 34, 56)
         result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
-        # Time-only format should not be mistaken as a date-only value.
-        assert result == str(dt)
+        assert result == "2021-08-08 12:34:56"
 
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
@@ -146,6 +145,25 @@ def xlsx_path():
             pass
 
 
+@pytest.fixture
+def xlsx_path_with_formats():
+    """Fixture for temp xlsx files with custom number formats."""
+    paths = []
+
+    def factory(rows: list[list], number_formats: dict[tuple[int, int], str]) -> str:
+        path = _make_xlsx_with_formats(rows, number_formats)
+        paths.append(path)
+        return path
+
+    yield factory
+
+    for p in paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+
+
 class TestSheetToTextDf:
     COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
 
@@ -191,18 +209,11 @@ class TestSheetToTextDf:
         result = df.iloc[0]["order_date_text"]
         assert result == "2023-01-15 00:00:00"
 
-    def test_datetime_and_currency_display_preserved(self):
-        path = _make_xlsx_with_formats(
+    def test_datetime_and_currency_display_preserved(self, xlsx_path_with_formats):
+        path = xlsx_path_with_formats(
             [[datetime(2021, 8, 8, 0, 0, 0), "user@example.com", 43.58, "ORD-001"]],
             {(2, 1): "yyyy年m月d日", (2, 3): "#,##0.00 €"},
         )
-        try:
-            df = _sheet_to_text_df(path, "orders", self.COLS)
-            assert df.iloc[0]["order_date_text"] == "2021年8月8日"
-            assert df.iloc[0]["net_amount_text"] == "43.58 €"
-        finally:
-            try:
-                os.unlink(path)
-            except OSError:
-                # Temp cleanup failure should not affect assertion semantics.
-                pass
+        df = _sheet_to_text_df(path, "orders", self.COLS)
+        assert df.iloc[0]["order_date_text"] == "2021年8月8日"
+        assert df.iloc[0]["net_amount_text"] == "43.58 €"

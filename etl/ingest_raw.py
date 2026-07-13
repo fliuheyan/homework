@@ -1,6 +1,7 @@
 import os
 import glob
 import uuid
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -82,18 +83,16 @@ def _cell_to_display_text(cell):
             decimals = 0
             if "." in section:
                 tail = section.split(".", 1)[1]
-                for ch in tail:
-                    if ch in ("0", "#"):
-                        decimals += 1
-                    else:
-                        break
+                decimals = len(re.findall(r"[0#]", tail))
             number = f"{float(v):.{decimals}f}"
             placeholder_positions = []
             for ch in ("#", "0"):
                 pos = section.find(ch)
                 if pos != -1:
                     placeholder_positions.append(pos)
-            first_placeholder = min(placeholder_positions) if placeholder_positions else len(section) + 1
+            if not placeholder_positions:
+                return str(v)
+            first_placeholder = min(placeholder_positions)
             symbol_pos = section.find(symbol)
             if symbol_pos < first_placeholder:
                 space = " " if symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " " else ""

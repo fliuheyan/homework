@@ -309,10 +309,7 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
     ]
 
     with engine.begin() as conn:
-        # Replace any previously stored rows for the same batch so re-running the
-        # checker stays idempotent even when the issue set shrinks to zero.
         conn.execute(text("DELETE FROM audit.data_quality_issue_summary WHERE batch_id = :b"), {"b": batch_label})
-        conn.execute(text("DELETE FROM audit.data_quality_table_summary WHERE batch_id = :b"), {"b": batch_label})
 
         conn.execute(
             text("""
@@ -320,6 +317,10 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
                     (batch_id, table_name, total_records, total_issues, created_at)
                 VALUES
                     (:batch_id, :table_name, :total_records, :total_issues, :created_at)
+                ON CONFLICT (batch_id, table_name) DO UPDATE
+                SET total_records = EXCLUDED.total_records,
+                    total_issues = EXCLUDED.total_issues,
+                    created_at = EXCLUDED.created_at
             """),
             table_records,
         )
@@ -331,6 +332,9 @@ def persist_quality_metrics(engine, batch_label, total_records_map, issue_df, ba
                         (batch_id, table_name, column_name, description, invalid_count, created_at)
                     VALUES
                         (:batch_id, :table_name, :column_name, :description, :invalid_count, :created_at)
+                    ON CONFLICT (batch_id, table_name, column_name, description) DO UPDATE
+                    SET invalid_count = EXCLUDED.invalid_count,
+                        created_at = EXCLUDED.created_at
                 """),
                 issue_records,
             )

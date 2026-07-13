@@ -139,7 +139,10 @@ SELECT
   started_at,
   ended_at,
   status,
-  EXTRACT(EPOCH FROM (COALESCE(ended_at, NOW()) - started_at))::DOUBLE PRECISION AS runtime_seconds,
+  CASE
+    WHEN ended_at IS NULL THEN NULL
+    ELSE EXTRACT(EPOCH FROM (ended_at - started_at))::DOUBLE PRECISION
+  END AS runtime_seconds,
   rows_orders,
   rows_customer,
   rows_survey,
@@ -163,34 +166,47 @@ latest_success AS (
   WHERE status = 'success'
   ORDER BY ended_at DESC NULLS LAST, run_id DESC
   LIMIT 1
+),
+aggregates AS (
+  SELECT
+    COUNT(*)::INT AS total_runs,
+    COUNT(*) FILTER (WHERE status = 'success')::INT AS success_runs,
+    COUNT(*) FILTER (WHERE status = 'failed')::INT AS failed_runs,
+    COUNT(*) FILTER (WHERE status = 'running')::INT AS running_runs,
+    ROUND(
+      (100.0 * COUNT(*) FILTER (WHERE status = 'success') / NULLIF(COUNT(*), 0))::NUMERIC,
+      2
+    ) AS success_rate_pct,
+    ROUND(
+      (AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) FILTER (WHERE ended_at IS NOT NULL))::NUMERIC,
+      2
+    ) AS avg_runtime_seconds,
+    ROUND(
+      (
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)))
+        FILTER (WHERE ended_at IS NOT NULL)
+      )::NUMERIC,
+      2
+    ) AS p95_runtime_seconds
+  FROM audit.etl_run_log
 )
 SELECT
-  COUNT(*)::INT AS total_runs,
-  COUNT(*) FILTER (WHERE status = 'success')::INT AS success_runs,
-  COUNT(*) FILTER (WHERE status = 'failed')::INT AS failed_runs,
-  COUNT(*) FILTER (WHERE status = 'running')::INT AS running_runs,
-  ROUND(
-    100.0 * COUNT(*) FILTER (WHERE status = 'success') / NULLIF(COUNT(*), 0),
-    2
-  ) AS success_rate_pct,
-  ROUND(
-    (AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) FILTER (WHERE ended_at IS NOT NULL))::NUMERIC,
-    2
-  ) AS avg_runtime_seconds,
-  ROUND(
-    (
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)))
-      FILTER (WHERE ended_at IS NOT NULL)
-    )::NUMERIC,
-    2
-  ) AS p95_runtime_seconds,
-  (SELECT ended_at FROM latest_success) AS last_successful_load_at,
-  (SELECT batch_id FROM latest_success) AS last_successful_batch_id,
-  (SELECT batch_id FROM latest_run) AS latest_batch_id,
-  (SELECT status FROM latest_run) AS latest_status,
-  (SELECT started_at FROM latest_run) AS latest_started_at,
-  (SELECT ended_at FROM latest_run) AS latest_ended_at
-FROM audit.etl_run_log;
+  a.total_runs,
+  a.success_runs,
+  a.failed_runs,
+  a.running_runs,
+  a.success_rate_pct,
+  a.avg_runtime_seconds,
+  a.p95_runtime_seconds,
+  ls.ended_at AS last_successful_load_at,
+  ls.batch_id AS last_successful_batch_id,
+  lr.batch_id AS latest_batch_id,
+  lr.status AS latest_status,
+  lr.started_at AS latest_started_at,
+  lr.ended_at AS latest_ended_at
+FROM aggregates a
+LEFT JOIN latest_success ls ON TRUE
+LEFT JOIN latest_run lr ON TRUE;
 
 CREATE OR REPLACE VIEW audit.v_data_quality_batch_metrics AS
 SELECT

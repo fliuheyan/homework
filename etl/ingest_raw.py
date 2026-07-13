@@ -31,6 +31,23 @@ RAW_COLUMNS = {
 }
 
 CURRENCY_SYMBOLS = ["€", "$", "£", "¥", "₩"]
+MONTH_NAMES_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MONTH_NAMES_FULL = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+WEEKDAY_NAMES_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEKDAY_NAMES_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 def _strip_excel_literals(fmt: str) -> str:
@@ -53,6 +70,125 @@ def _strip_excel_literals(fmt: str) -> str:
     return "".join(out)
 
 
+def _first_format_section(raw_fmt: str) -> str:
+    if not raw_fmt:
+        return ""
+    in_quotes = False
+    for i, ch in enumerate(raw_fmt):
+        if ch == '"':
+            in_quotes = not in_quotes
+        elif ch == ";" and not in_quotes:
+            return raw_fmt[:i]
+    return raw_fmt
+
+
+def _iter_format_parts(section: str):
+    i = 0
+    while i < len(section):
+        ch = section[i]
+        if ch == '"':
+            j = i + 1
+            while j < len(section) and section[j] != '"':
+                j += 1
+            yield ("literal", section[i + 1:j])
+            i = j + 1
+            continue
+        if ch == "\\" and i + 1 < len(section):
+            yield ("literal", section[i + 1])
+            i += 2
+            continue
+        if ch in ("_", "*"):
+            i += 2
+            continue
+        if ch == "[":
+            j = section.find("]", i + 1)
+            i = len(section) if j == -1 else j + 1
+            continue
+        if ch.isalpha():
+            j = i + 1
+            while j < len(section) and section[j].lower() == ch.lower():
+                j += 1
+            yield ("token", section[i:j])
+            i = j
+            continue
+        yield ("literal", ch)
+        i += 1
+
+
+def _clean_number_format_section(section: str) -> str:
+    return "".join(value for _, value in _iter_format_parts(section))
+
+
+def _last_placeholder_index(section: str) -> int:
+    last_index = -1
+    for ch in ("#", "0", "?"):
+        idx = section.rfind(ch)
+        if idx > last_index:
+            last_index = idx
+    return last_index
+
+
+def _is_minute_token(parts: list[tuple[str, str]], idx: int) -> bool:
+    prev_token = ""
+    for i in range(idx - 1, -1, -1):
+        kind, value = parts[i]
+        if kind == "token":
+            prev_token = value.lower()
+            break
+
+    next_token = ""
+    for i in range(idx + 1, len(parts)):
+        kind, value = parts[i]
+        if kind == "token":
+            next_token = value.lower()
+            break
+
+    return prev_token.startswith("h") or next_token.startswith("s")
+
+
+def _render_datetime_with_excel_format(v: datetime, section: str) -> str:
+    parts = list(_iter_format_parts(section))
+    rendered = []
+    for idx, (kind, value) in enumerate(parts):
+        if kind == "literal":
+            rendered.append(value)
+            continue
+
+        token = value.lower()
+        if token.startswith("y"):
+            if len(token) == 2:
+                rendered.append(f"{v.year % 100:02d}")
+            else:
+                rendered.append(f"{v.year:04d}")
+        elif token.startswith("d"):
+            if len(token) == 1:
+                rendered.append(str(v.day))
+            elif len(token) == 2:
+                rendered.append(f"{v.day:02d}")
+            elif len(token) == 3:
+                rendered.append(WEEKDAY_NAMES_ABBR[v.weekday()])
+            else:
+                rendered.append(WEEKDAY_NAMES_FULL[v.weekday()])
+        elif token.startswith("m"):
+            if _is_minute_token(parts, idx):
+                rendered.append(f"{v.minute:02d}" if len(token) >= 2 else str(v.minute))
+            elif len(token) == 1:
+                rendered.append(str(v.month))
+            elif len(token) == 2:
+                rendered.append(f"{v.month:02d}")
+            elif len(token) == 3:
+                rendered.append(MONTH_NAMES_ABBR[v.month - 1])
+            else:
+                rendered.append(MONTH_NAMES_FULL[v.month - 1])
+        elif token.startswith("h"):
+            rendered.append(f"{v.hour:02d}" if len(token) >= 2 else str(v.hour))
+        elif token.startswith("s"):
+            rendered.append(f"{v.second:02d}" if len(token) >= 2 else str(v.second))
+        else:
+            rendered.append(value)
+    return "".join(rendered)
+
+
 def _cell_to_display_text(cell):
     """Return Excel-like display text for raw ingestion."""
     v = cell.value
@@ -64,45 +200,22 @@ def _cell_to_display_text(cell):
     raw_fmt = (cell.number_format or "")
     fmt = raw_fmt.lower()
     clean_fmt = _strip_excel_literals(fmt)
-    clean_first_section = _strip_excel_literals(raw_fmt.split(";")[0])
+    first_section = _first_format_section(raw_fmt)
+    clean_first_section = _strip_excel_literals(first_section)
 
     if isinstance(v, datetime):
-        if ("年" in clean_fmt) and ("月" in clean_fmt) and ("日" in clean_fmt):
-            m = f"{v.month:02d}" if "mm" in clean_fmt else str(v.month)
-            d = f"{v.day:02d}" if "dd" in clean_fmt else str(v.day)
-            return f"{v.year}年{m}月{d}日"
-        has_date_tokens = (
-            any(t in clean_fmt for t in ["y", "d", "年", "月", "日"])
-            or bool(re.search(r"[ymd]+[/-][ymd]+", clean_fmt))
+        has_date_tokens = any(t in clean_fmt for t in ["y", "d", "年", "月", "日"]) or bool(
+            re.search(r"(y+|d+|m{3,4}|m{1,2})", clean_fmt)
         )
-        has_time_tokens = (
-            any(t in clean_fmt for t in ["h", "s", "时", "分", "秒"])
-            or bool(re.search(r"h+:[m]+", clean_fmt))
+        has_time_tokens = any(t in clean_fmt for t in ["h", "s", "时", "分", "秒"]) or bool(
+            re.search(r"(h+|s+)", clean_fmt)
         )
-        if has_time_tokens and not has_date_tokens:
-            return v.strftime("%H:%M:%S")
-        if has_date_tokens and has_time_tokens:
-            return v.strftime("%Y-%m-%d %H:%M:%S")
-        if has_date_tokens:
-            date_fmt = clean_first_section.lower()
-
-            def _repl(match):
-                token = match.group(0)
-                ch = token[0]
-                if ch == "y":
-                    return f"{v.year % 100:02d}" if len(token) == 2 else f"{v.year:04d}"
-                if ch == "m":
-                    return f"{v.month:02d}" if len(token) >= 2 else str(v.month)
-                if ch == "d":
-                    return f"{v.day:02d}" if len(token) >= 2 else str(v.day)
-                return token
-
-            return re.sub(r"y{2,4}|m{1,2}|d{1,2}", _repl, date_fmt)
+        if has_date_tokens or has_time_tokens:
+            return _render_datetime_with_excel_format(v, first_section)
         return str(v)
 
     if isinstance(v, (int, float, Decimal)):
-        symbol = next((s for s in CURRENCY_SYMBOLS if s in clean_fmt), None)
-        section = clean_first_section
+        section = _clean_number_format_section(first_section)
         decimals = 0
         if "." in section:
             tail = section.split(".", 1)[1]
@@ -122,16 +235,13 @@ def _cell_to_display_text(cell):
         integer_part = section.split(".", 1)[0]
         use_grouping = "," in integer_part
         number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")
-        if symbol:
-            symbol_pos = section.find(symbol)
-            has_space_near_symbol = (
-                (symbol_pos + 1 < len(section) and section[symbol_pos + 1].isspace())
-                or (symbol_pos > 0 and section[symbol_pos - 1].isspace())
-            )
-            space = " " if has_space_near_symbol else ""
-            if symbol_pos < first_placeholder:
-                return f"{symbol}{space}{number}"
-            return f"{number}{space}{symbol}"
+        last_placeholder = _last_placeholder_index(section)
+        if last_placeholder == -1:
+            return number
+        prefix = section[:first_placeholder]
+        suffix = section[last_placeholder + 1 :]
+        if any(symbol in prefix or symbol in suffix for symbol in CURRENCY_SYMBOLS):
+            return f"{prefix}{number}{suffix}".strip()
         return number
 
     return str(v)

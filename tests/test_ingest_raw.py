@@ -16,6 +16,7 @@ from etl.ingest_raw import _cell_to_display_text, _sheet_to_text_df
 
 CUSTOMER_CITY_ZIP_MODULE = "etl.transformers.customer.05_normalize_city_zip"
 COLS = ["order_date_text", "email_text", "net_amount_text", "order_number_text"]
+ACCOUNTING_EUR_FORMAT = '_-* #,##0.00\\ "€"_-;\\-* #,##0.00\\ "€"_-;_-* "-"??\\ "€"_-;_-@_-'
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +86,27 @@ class TestCellToDisplayText:
         result = _cell_to_display_text(_FakeCell(dt, number_format="yyyy年m月d日"))
         assert result == "2021年8月8日"
 
+    def test_locale_short_month_date_display_preserved(self):
+        dt = datetime(2021, 8, 2, 0, 0, 0)
+        # [$-407] is a locale tag; raw ingest should preserve the visible d/mmm text.
+        result = _cell_to_display_text(_FakeCell(dt, number_format='[$-407]d/\\ mmm/;@'))
+        assert result == "2/ Aug/"
+
+    def test_long_date_display_preserved(self):
+        dt = datetime(2021, 8, 8, 0, 0, 0)
+        assert dt.weekday() == 6
+        result = _cell_to_display_text(_FakeCell(dt, number_format='[$-F800]dddd\\,\\ mmmm\\ dd\\,\\ yyyy'))
+        assert result == "Sunday, August 08, 2021"
+
     def test_time_only_format_not_forced_to_date(self):
         dt = datetime(2021, 8, 8, 12, 34, 56)
         result = _cell_to_display_text(_FakeCell(dt, number_format="hh:mm:ss"))
         assert result == "12:34:56"
+
+    def test_single_hour_token_preserved(self):
+        dt = datetime(2021, 8, 8, 0, 34, 56)
+        result = _cell_to_display_text(_FakeCell(dt, number_format="yyyy-mm-dd h:mm:ss"))
+        assert result == "2021-08-08 0:34:56"
 
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
@@ -210,7 +228,7 @@ class TestSheetToTextDf:
         path = xlsx_path([[dt, "user@example.com", "100", "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", COLS)
         result = df.iloc[0]["order_date_text"]
-        assert result == "2023-01-15 00:00:00"
+        assert result == "2023-01-15 0:00:00"
 
     def test_datetime_and_currency_display_preserved(self, xlsx_path_with_formats):
         path = xlsx_path_with_formats(
@@ -221,6 +239,18 @@ class TestSheetToTextDf:
         assert df.iloc[0]["order_date_text"] == "2021年8月8日"
         assert df.iloc[0]["net_amount_text"] == "43.58 €"
 
+    def test_workbook_specific_formats_preserved(self, xlsx_path_with_formats):
+        path = xlsx_path_with_formats(
+            [[datetime(2021, 8, 2, 0, 0, 0), "user@example.com", 96.17, "ORD-001"]],
+            {
+                (2, 1): '[$-407]d/\\ mmm/;@',
+                (2, 3): ACCOUNTING_EUR_FORMAT,
+            },
+        )
+        df = _sheet_to_text_df(path, "orders", COLS)
+        assert df.iloc[0]["order_date_text"] == "2/ Aug/"
+        assert df.iloc[0]["net_amount_text"] == "96.17 €"
+        
     def test_preformatted_text_cells_preserved(self, xlsx_path):
         path = xlsx_path([["2021年8月5日", "Muster8@Mailing.com", "$51.95", "ORD153"]])
         df = _sheet_to_text_df(path, "orders", COLS)

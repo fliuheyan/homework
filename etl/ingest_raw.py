@@ -116,13 +116,7 @@ def _iter_format_parts(section: str):
 
 
 def _clean_number_format_section(section: str) -> str:
-    cleaned = []
-    for kind, value in _iter_format_parts(section):
-        if kind == "token":
-            cleaned.append(value)
-        else:
-            cleaned.append(value)
-    return "".join(cleaned)
+    return "".join(value for _, value in _iter_format_parts(section))
 
 
 def _is_minute_token(parts: list[tuple[str, str]], idx: int) -> bool:
@@ -218,6 +212,8 @@ def _cell_to_display_text(cell):
         use_grouping = "," in integer_part
         number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")
         last_placeholder = max(section.rfind("#"), section.rfind("0"), section.rfind("?"))
+        if last_placeholder == -1:
+            return number
         prefix = section[:first_placeholder]
         suffix = section[last_placeholder + 1 :]
         if any(symbol in prefix or symbol in suffix for symbol in CURRENCY_SYMBOLS):

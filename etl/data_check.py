@@ -41,6 +41,10 @@ def safe_col(df, names):
     return None
 
 
+_PG_DATE_RE = re.compile(r"^\d{4}([/\-])\d{1,2}\1\d{1,2}$")
+_CURRENCY_RE = re.compile(r"[€$£¥₩]")
+
+
 def date_ok(v):
     if is_datetime_like(v):
         return True
@@ -53,12 +57,29 @@ def date_ok(v):
     return not pd.isna(d)
 
 
+def order_date_ok(v):
+    """Accepts datetime objects or year-first date strings with consistent separators, e.g. 2021/9/1 or 2021-09-01."""
+    if is_datetime_like(v):
+        return True
+    if is_null_like(v):
+        return False
+    x = str(v).strip()
+    if not _PG_DATE_RE.match(x):
+        return False
+    d = pd.to_datetime(x, errors="coerce", dayfirst=False)
+    return not pd.isna(d)
+
+
 def amount_ok(v):
     if is_null_like(v):
         return False
     if isinstance(v, (int, float)) and not pd.isna(v):
         return True
-    x = str(v).strip().replace("€", "").replace("$", "").replace(" ", "").replace(",", ".")
+    x = str(v).strip()
+    # Currency symbols are not allowed; reject anything containing them
+    if _CURRENCY_RE.search(x):
+        return False
+    x = x.replace(" ", "").replace(",", ".")
     if not re.match(r"^-?\d+(\.\d{1,2})?$", x):
         return False
     try:
@@ -87,11 +108,11 @@ def check_orders(df):
     c_amt = safe_col(df, ["net_amount_text", "net_amount"])
 
     if c_date:
-        m = (~df[c_date].apply(date_ok)) & (~df[c_date].apply(is_null_like))
-        rows.append((t, c_date, "Invalid order date format", int(m.sum())))
+        m = (~df[c_date].apply(order_date_ok)) & (~df[c_date].apply(is_null_like))
+        rows.append((t, c_date, "Invalid order date format (expected YYYY/M/D or YYYY-MM-DD)", int(m.sum())))
     if c_amt:
         m = (~df[c_amt].apply(amount_ok)) & (~df[c_amt].apply(is_null_like))
-        rows.append((t, c_amt, "Invalid net amount format", int(m.sum())))
+        rows.append((t, c_amt, "Invalid net amount format (plain number required, no currency symbols)", int(m.sum())))
 
     return rows
 

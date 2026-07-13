@@ -7,7 +7,10 @@ from etl.plugin_engine import discover_plugins_for_table, run_plugins
 
 def refresh_customer_monthly_order_summary(conn, batch_id):
     try:
-        conn.execute(text("TRUNCATE audit.customer_monthly_order_summary"))
+        conn.execute(
+            text("DELETE FROM audit.customer_monthly_order_summary WHERE batch_id = :b"),
+            {"b": batch_id},
+        )
         conn.execute(text("""
             INSERT INTO audit.customer_monthly_order_summary (
                 batch_id,
@@ -87,11 +90,6 @@ def main():
         df_customer = run_plugins(df_customer, customer_plugins)
         df_survey = run_plugins(df_survey, survey_plugins)
 
-        # 4) 清空 core（作业场景可接受；生产建议增量 merge）
-        with engine.begin() as conn:
-            conn.execute(text("TRUNCATE core.survey, core.orders, core.customer RESTART IDENTITY CASCADE"))
-
-        # 5) 写入 core.customer（允许 email 重复）
         customer_required_cols = [
             "email", "email_norm", "birthday", "gender",
             "country_code", "zip_code", "city", "loyalty_score"
@@ -100,35 +98,39 @@ def main():
         if missing_customer_cols:
             raise ValueError(f"customer plugins output missing columns: {missing_customer_cols}")
 
-        customer_insert = df_customer[customer_required_cols].copy()
-        customer_insert.to_sql("customer", engine, schema="core", if_exists="append", index=False)
+        orders_required_cols = ["order_number", "email_norm", "order_date", "net_amount"]
+        missing_orders_cols = [c for c in orders_required_cols if c not in df_orders.columns]
+        if missing_orders_cols:
+            raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
 
-        # 6) orders 通过 email_norm 关联 customer_id（同 email 取最新 customer_id）
+        survey_required_cols = ["respondent_key", "key_type", "diet_pref", "taste_pref"]
+        missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]
+        if missing_survey_cols:
+            raise ValueError(f"survey plugins output missing columns: {missing_survey_cols}")
+
         with engine.begin() as conn:
+            # 4) Rebuild core tables in one transaction
+            conn.execute(text("TRUNCATE core.survey, core.orders, core.customer RESTART IDENTITY CASCADE"))
+
+            customer_insert = df_customer[customer_required_cols].copy()
+            customer_insert.to_sql("customer", conn, schema="core", if_exists="append", index=False)
+
             customer_map = pd.read_sql(text("""
                 SELECT customer_id, email_norm
                 FROM core.customer
                 WHERE email_norm IS NOT NULL
                 ORDER BY customer_id DESC
             """), conn)
+            customer_map = customer_map.drop_duplicates(subset=["email_norm"], keep="first")
 
-        customer_map = customer_map.drop_duplicates(subset=["email_norm"], keep="first")
+            df_orders_core = df_orders.merge(customer_map, on="email_norm", how="left")
+            df_orders_core = df_orders_core.dropna(subset=["customer_id", "order_date", "net_amount", "order_number"])
+            df_orders_core = df_orders_core.drop_duplicates(subset=["order_number"], keep="first")
 
-        orders_required_cols = ["order_number", "email_norm", "order_date", "net_amount"]
-        missing_orders_cols = [c for c in orders_required_cols if c not in df_orders.columns]
-        if missing_orders_cols:
-            raise ValueError(f"orders plugins output missing columns: {missing_orders_cols}")
+            orders_insert = df_orders_core[["order_number", "customer_id", "order_date", "net_amount"]].copy()
+            orders_insert["customer_id"] = orders_insert["customer_id"].astype(int)
+            orders_insert.to_sql("orders", conn, schema="core", if_exists="append", index=False)
 
-        df_orders = df_orders.merge(customer_map, on="email_norm", how="left")
-        df_orders = df_orders.dropna(subset=["customer_id", "order_date", "net_amount", "order_number"])
-        df_orders = df_orders.drop_duplicates(subset=["order_number"], keep="first")
-
-        orders_insert = df_orders[["order_number", "customer_id", "order_date", "net_amount"]].copy()
-        orders_insert["customer_id"] = orders_insert["customer_id"].astype(int)
-        orders_insert.to_sql("orders", engine, schema="core", if_exists="append", index=False)
-
-        # 7) survey 关联 order / customer
-        with engine.begin() as conn:
             order_map = pd.read_sql(text("SELECT order_id, order_number FROM core.orders"), conn)
             customer_map2 = pd.read_sql(text("""
                 SELECT customer_id, email_norm
@@ -136,36 +138,29 @@ def main():
                 WHERE email_norm IS NOT NULL
                 ORDER BY customer_id DESC
             """), conn)
+            unique_email_mask = ~customer_map2["email_norm"].duplicated(keep=False)
+            customer_map2 = customer_map2[unique_email_mask]
 
-        unique_email_mask = ~customer_map2["email_norm"].duplicated(keep=False)
-        customer_map2 = customer_map2[unique_email_mask]
+            df_survey_core = df_survey.copy()
+            df_survey_core["order_number_norm"] = df_survey_core["respondent_key"].where(df_survey_core["key_type"] == "order_number")
+            df_survey_core["email_norm"] = (
+                df_survey_core["respondent_key"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .where(df_survey_core["key_type"] == "email")
+            )
 
-        survey_required_cols = ["respondent_key", "key_type", "diet_pref", "taste_pref"]
-        missing_survey_cols = [c for c in survey_required_cols if c not in df_survey.columns]
-        if missing_survey_cols:
-            raise ValueError(f"survey plugins output missing columns: {missing_survey_cols}")
+            df_survey_core = df_survey_core.merge(order_map, left_on="order_number_norm", right_on="order_number", how="left")
+            df_survey_core = df_survey_core.merge(customer_map2, on="email_norm", how="left")
 
-        df_survey["order_number_norm"] = df_survey["respondent_key"].where(df_survey["key_type"] == "order_number")
-        df_survey["email_norm"] = (
-            df_survey["respondent_key"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .where(df_survey["key_type"] == "email")
-        )
+            survey_insert = df_survey_core[["respondent_key", "key_type", "customer_id", "order_id", "diet_pref", "taste_pref"]].copy()
+            survey_insert.to_sql("survey", conn, schema="core", if_exists="append", index=False)
 
-        df_survey = df_survey.merge(order_map, left_on="order_number_norm", right_on="order_number", how="left")
-        df_survey = df_survey.merge(customer_map2, on="email_norm", how="left")
-
-        survey_insert = df_survey[["respondent_key", "key_type", "customer_id", "order_id", "diet_pref", "taste_pref"]].copy()
-        survey_insert.to_sql("survey", engine, schema="core", if_exists="append", index=False)
-
-        # 8) Refresh monthly customer order summary
-        with engine.begin() as conn:
+            # 5) Refresh monthly customer order summary for this batch
             refresh_customer_monthly_order_summary(conn, batch_id)
 
-        # 9) Write back run log
-        with engine.begin() as conn:
+            # 6) Write back run log
             stats = {
                 "ror": conn.execute(text("SELECT COUNT(*) FROM raw.orders WHERE batch_id = :b"), {"b": batch_id}).scalar(),
                 "rcr": conn.execute(text("SELECT COUNT(*) FROM raw.customer WHERE batch_id = :b"), {"b": batch_id}).scalar(),

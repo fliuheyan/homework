@@ -67,7 +67,7 @@ We use a plugin-based mechanism here; the program scans all folders within trans
 | `audit.etl_run_log` | Start time, end time, status, row counts, and error message for each ETL batch |
 | `audit.data_quality_issue_summary` | Field-level quality issue statistics |
 | `audit.data_quality_table_summary` | Table-level totals and invalid-record counts |
-| `audit.customer_monthly_order_summary` | Latest core snapshot monthly order totals per customer, refreshed after each `core.*` rebuild |
+| `audit.customer_monthly_order_summary` | Monthly order totals per customer for each ETL batch, refreshed after each `core.*` rebuild |
 | `audit.v_etl_run_metrics` | Per-run duration and status metrics |
 | `audit.v_etl_health_kpis` | Latest status, success rate, average runtime, and P95 runtime |
 | `audit.v_data_quality_batch_metrics` | Per-table issue rate for each batch |
@@ -80,7 +80,7 @@ We use a plugin-based mechanism here; the program scans all folders within trans
 
 | Column | Datatype | Description |
 |---|---|---|
-| `batch_id` | `TEXT` | ETL batch identifier stored for the latest rebuilt snapshot |
+| `batch_id` | `TEXT` | ETL batch identifier for the snapshot stored in the summary row |
 | `customer_id` | `BIGINT` | Customer foreign key from `core.customer.customer_id` |
 | `customer_email` | `TEXT` | Customer email stored from `core.customer.email` |
 | `order_month` | `DATE` | First day of the order month derived from `core.orders.order_date` |
@@ -92,12 +92,13 @@ Short SQL query:
 
 ```sql
 SELECT
+  batch_id,
   customer_id,
   customer_email,
   order_month,
   total_net_amount
 FROM audit.customer_monthly_order_summary
-ORDER BY customer_id, order_month;
+ORDER BY batch_id DESC, customer_id, order_month;
 ```
 
 ---

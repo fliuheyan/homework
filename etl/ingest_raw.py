@@ -87,35 +87,39 @@ def _cell_to_display_text(cell):
 
     if isinstance(v, (int, float, Decimal)):
         symbol = next((s for s in CURRENCY_SYMBOLS if s in clean_fmt), None)
+        section = clean_first_section
+        decimals = 0
+        if "." in section:
+            tail = section.split(".", 1)[1]
+            for ch in tail:
+                if ch in ("0", "#"):
+                    decimals += 1
+                elif ch == ",":
+                    continue
+                else:
+                    break
+        placeholder_positions = []
+        for ch in ("#", "0"):
+            pos = section.find(ch)
+            if pos != -1:
+                placeholder_positions.append(pos)
+        if not placeholder_positions:
+            return str(v)
+        first_placeholder = min(placeholder_positions)
+        integer_part = section.split(".", 1)[0]
+        use_grouping = "," in integer_part
+        number = format(float(v), f",.{decimals}f" if use_grouping else f".{decimals}f")
         if symbol:
-            section = clean_first_section
-            decimals = 0
-            if "." in section:
-                tail = section.split(".", 1)[1]
-                for ch in tail:
-                    if ch in ("0", "#"):
-                        decimals += 1
-                    else:
-                        break
-            number = f"{float(v):.{decimals}f}"
-            placeholder_positions = []
-            for ch in ("#", "0"):
-                pos = section.find(ch)
-                if pos != -1:
-                    placeholder_positions.append(pos)
-            if not placeholder_positions:
-                return str(v)
-            first_placeholder = min(placeholder_positions)
             symbol_pos = section.find(symbol)
             has_space_near_symbol = (
-                (symbol_pos + 1 < len(section) and section[symbol_pos + 1] == " ")
-                or (symbol_pos > 0 and section[symbol_pos - 1] == " ")
+                (symbol_pos + 1 < len(section) and section[symbol_pos + 1].isspace())
+                or (symbol_pos > 0 and section[symbol_pos - 1].isspace())
             )
             space = " " if has_space_near_symbol else ""
             if symbol_pos < first_placeholder:
                 return f"{symbol}{space}{number}"
             return f"{number}{space}{symbol}"
-        return str(v)
+        return number
 
     return str(v)
 

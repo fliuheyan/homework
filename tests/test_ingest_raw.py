@@ -58,11 +58,11 @@ class TestCellToDisplayText:
 
     def test_integer_value_no_formatting(self):
         result = _cell_to_display_text(_FakeCell(42, number_format="#,##0.00"))
-        assert result == "42"
+        assert result == "42.00"
 
     def test_float_value_no_formatting(self):
         result = _cell_to_display_text(_FakeCell(1234.5, number_format="#,##0.00"))
-        assert result == "1234.5"
+        assert result == "1,234.50"
 
     def test_datetime_value_no_formatting(self):
         dt = datetime(2023, 1, 15, 10, 30, 0)

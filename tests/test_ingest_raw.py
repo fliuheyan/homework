@@ -1,7 +1,7 @@
 """
 Tests for etl/ingest_raw.py: verify that _cell_to_display_text stores
-Excel cell values exactly as-is (no trimming, no type coercion, no
-empty-string-to-NULL conversion, no date/number formatting).
+Excel cell values exactly as-is (no trimming, no empty-string-to-NULL
+conversion, no extra processing beyond Excel's raw read value).
 """
 import os
 import tempfile
@@ -55,24 +55,23 @@ class TestCellToDisplayText:
         assert _cell_to_display_text(_FakeCell("007")) == "007"
 
     def test_integer_value_no_formatting(self):
-        # An integer in Excel should become its plain string, not currency-formatted
+        # An integer in Excel should remain integer (no extra formatting)
         result = _cell_to_display_text(_FakeCell(42, number_format="#,##0.00"))
-        assert result == "42"
+        assert result == 42
 
     def test_float_value_no_formatting(self):
         result = _cell_to_display_text(_FakeCell(1234.5, number_format="#,##0.00"))
-        assert result == "1234.5"
+        assert result == 1234.5
 
     def test_datetime_value_no_formatting(self):
         dt = datetime(2023, 1, 15, 10, 30, 0)
         result = _cell_to_display_text(_FakeCell(dt, number_format="dd/mm/yyyy"))
-        # Must be the raw str() representation, NOT a reformatted date string
-        assert result == str(dt)
+        assert result == dt
 
     def test_date_value_no_formatting(self):
         d = date(2023, 1, 15)
         result = _cell_to_display_text(_FakeCell(d))
-        assert result == str(d)
+        assert result == d
 
     def test_no_whitespace_trimming(self):
         """Trimming must never happen, regardless of surrounding whitespace."""
@@ -147,20 +146,20 @@ class TestSheetToTextDf:
         assert df.iloc[0]["net_amount_text"] == "007"
 
     def test_integer_cell_not_formatted(self, xlsx_path):
-        """An integer cell must be stored as plain str(int), no thousand separators."""
+        """An integer cell must keep Excel raw read value (int)."""
         path = xlsx_path([["2023-01-15", "user@example.com", 1234567, "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
-        assert df.iloc[0]["net_amount_text"] == "1234567"
+        assert df.iloc[0]["net_amount_text"] == 1234567
 
     def test_float_cell_not_formatted(self, xlsx_path):
         path = xlsx_path([["2023-01-15", "user@example.com", 99.9, "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
-        assert df.iloc[0]["net_amount_text"] == "99.9"
+        assert df.iloc[0]["net_amount_text"] == 99.9
 
     def test_datetime_cell_raw_str(self, xlsx_path):
-        """A datetime cell must produce str(datetime), not a reformatted date string."""
+        """A datetime cell must keep Excel raw read value (datetime)."""
         dt = datetime(2023, 1, 15, 0, 0, 0)
         path = xlsx_path([[dt, "user@example.com", "100", "ORD-001"]])
         df = _sheet_to_text_df(path, "orders", self.COLS)
         result = df.iloc[0]["order_date_text"]
-        assert result == str(dt)
+        assert result == dt

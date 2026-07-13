@@ -30,17 +30,16 @@ RAW_COLUMNS = {
 
 
 def _cell_to_display_text(cell):
-    """Return the raw cell value as a string with no transformation.
+    """Return the raw cell value with no transformation.
 
     Rules:
     - Empty cell (value is None) → None
-    - All other values → str(v), preserving exact content: leading/trailing
-      spaces, empty strings, date objects, numeric values, etc.
+    - All other values → return as-is (string/date/datetime/number/etc.)
     """
     v = cell.value
     if v is None:
         return None
-    return str(v)
+    return v
 
 
 def _sheet_to_text_df(file_path: str, sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:
@@ -105,7 +104,7 @@ def main():
             schema, table = SHEET_TO_RAW_TABLE[sheet_l]
             expected_cols = RAW_COLUMNS[sheet_l]
 
-            # 关键修复：按单元格值 + number_format 生成文本，避免自动类型规范化
+            # 原样读取 Excel 单元格值，不对字段做额外处理
             df = _sheet_to_text_df(file_path, sheet, expected_cols)
 
             df = add_audit_cols(df, source_file, sheet, batch_id)

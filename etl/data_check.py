@@ -139,6 +139,25 @@ def reference_ok(v):
     return reference_kind(v) in {REFERENCE_KIND_EMAIL, REFERENCE_KIND_ORDER}
 
 
+def normalize_email_key(v):
+    if is_null_like(v):
+        return None
+    return str(v).strip().lower()
+
+
+def duplicate_customer_emails(df_customer):
+    if df_customer is None:
+        return set()
+    c_email = safe_col(df_customer, ["email_norm", "email_text", "email"])
+    if not c_email:
+        return set()
+    emails = df_customer[c_email].apply(normalize_email_key).dropna()
+    if emails.empty:
+        return set()
+    counts = emails.value_counts()
+    return set(counts[counts > 1].index)
+
+
 def collect_issue(rows, row_sets, table_name, column_name, description, mask):
     """Append one issue summary row and accumulate affected DataFrame indexes."""
     invalid_count = int(mask.sum())
@@ -201,7 +220,7 @@ def check_customer(df):
     return rows, row_sets[t]
 
 
-def check_survey(df):
+def check_survey(df, df_customer=None):
     t = "raw.survey_raw"
     rows = []
     row_sets = {t: set()}
@@ -214,11 +233,11 @@ def check_survey(df):
         collect_issue(rows, row_sets, t, c_ref, "Invalid reference format (email or ORD+digits)", m)
 
         kinds = df[c_ref].apply(reference_kind)
-        has_email = (kinds == REFERENCE_KIND_EMAIL).any()
-        has_order = (kinds == REFERENCE_KIND_ORDER).any()
-        if has_email and has_order:
-            mixed_type_mask = kinds.isin({REFERENCE_KIND_EMAIL, REFERENCE_KIND_ORDER})
-            collect_issue(rows, row_sets, t, c_ref, "Mixed reference types detected (email and order number)", mixed_type_mask)
+        dup_emails = duplicate_customer_emails(df_customer)
+        if dup_emails:
+            survey_emails = df[c_ref].apply(normalize_email_key)
+            duplicate_email_mask = (kinds == REFERENCE_KIND_EMAIL) & survey_emails.isin(dup_emails)
+            collect_issue(rows, row_sets, t, c_ref, "Email respondent key matches non-unique customer email", duplicate_email_mask)
 
     if c_nut:
         m = df[c_nut].apply(is_null_like)
@@ -297,7 +316,7 @@ def main():
 
     order_issues, order_bad_rows = check_orders(df_orders)
     customer_issues, customer_bad_rows = check_customer(df_customer)
-    survey_issues, survey_bad_rows = check_survey(df_survey)
+    survey_issues, survey_bad_rows = check_survey(df_survey, df_customer)
 
     issues += order_issues
     issues += customer_issues

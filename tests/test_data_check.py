@@ -74,22 +74,29 @@ def test_check_orders_detects_non_canonical_date_and_currency_amount():
     assert bad_rows == {1}
 
 
-def test_check_survey_flags_mixed_reference_types():
+def test_check_survey_flags_invalid_and_non_unique_customer_emails():
     df = pd.DataFrame(
         [
             {"respondent_key_text": "ORD126", "diet_pref_text": "vegan"},
-            {"respondent_key_text": "user@example.com", "diet_pref_text": "vegetarian"},
+            {"respondent_key_text": "dup@example.com", "diet_pref_text": "vegetarian"},
             {"respondent_key_text": "bad-key", "diet_pref_text": None},
         ]
     )
+    df_customer = pd.DataFrame(
+        [
+            {"email_text": "dup@example.com"},
+            {"email_text": " DUP@example.com "},
+            {"email_text": "unique@example.com"},
+        ]
+    )
 
-    rows, bad_rows = check_survey(df)
+    rows, bad_rows = check_survey(df, df_customer)
     counts = _issue_counts(rows)
 
     assert counts[("respondent_key_text", "Invalid reference format (email or ORD+digits)")] == 1
-    assert counts[("respondent_key_text", "Mixed reference types detected (email and order number)")] == 2
+    assert counts[("respondent_key_text", "Email respondent key matches non-unique customer email")] == 1
     assert counts[("diet_pref_text", "Nutrition is NULL/blank")] == 1
-    assert bad_rows == {0, 1, 2}
+    assert bad_rows == {1, 2}
 
 
 def test_write_report_uses_total_records_and_distinct_bad_rows(tmp_path):

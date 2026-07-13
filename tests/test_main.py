@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from etl.main import (
     attach_customer_ids_to_orders,
@@ -57,3 +58,16 @@ def test_get_order_customer_selection_seed(monkeypatch):
     monkeypatch.setenv("ORDER_CUSTOMER_SELECTION_SEED", "7")
 
     assert get_order_customer_selection_seed() == 7
+
+
+def test_get_order_customer_selection_seed_returns_none_when_missing(monkeypatch):
+    monkeypatch.delenv("ORDER_CUSTOMER_SELECTION_SEED", raising=False)
+
+    assert get_order_customer_selection_seed() is None
+
+
+def test_get_order_customer_selection_seed_raises_for_invalid_value(monkeypatch):
+    monkeypatch.setenv("ORDER_CUSTOMER_SELECTION_SEED", "abc")
+
+    with pytest.raises(ValueError, match="ORDER_CUSTOMER_SELECTION_SEED must be an integer"):
+        get_order_customer_selection_seed()

@@ -19,7 +19,12 @@ def pick_random_customer_ids_by_email(customer_df: pd.DataFrame, random_state=No
 
 def get_order_customer_selection_seed():
     seed = os.getenv("ORDER_CUSTOMER_SELECTION_SEED")
-    return int(seed) if seed is not None else None
+    if seed is None:
+        return None
+    try:
+        return int(seed)
+    except ValueError as exc:
+        raise ValueError("ORDER_CUSTOMER_SELECTION_SEED must be an integer") from exc
 
 
 def attach_customer_ids_to_orders(orders_df: pd.DataFrame, customer_df: pd.DataFrame, random_state=None) -> pd.DataFrame:
